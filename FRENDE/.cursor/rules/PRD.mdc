@@ -1,0 +1,284 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+
+This is the product I want to build. Do your code based on this PRD
+
+Product Requirements Document (PRD)
+Product Name: Frende
+Version: 1.0 (MVP)
+Prepared By: 
+Date: 
+
+1. Product Overview
+Goal: Build an AI-powered social media app to help users make new friends, through AI and fun challenges.
+Target Users:
+Students about to enter a new school (from junior high to high school or about to enter university)
+Young people who’s about to enter a new community that’d like to make new friends
+Anyone that wants to have new friends 
+Core Value Proposition:
+A fun app that matches friends with high compatibility and helps them break the ice, bond, and keep in touch with each other using Gen AI tasks and compatibility-based matching.
+
+2. Key Features
+Feature
+Description
+Priority
+1. Match friends slot
+- Users have 2 friend matching slots, with each slot users can match with new friends that the app finds compatible.
+- Matching algorithm based on information of the users
+
+- Slots are cleared when the friendmaking process is over (when 1 of 2 conditions are met: time passed since the match is 2 days or each user gains at least 50 coins from the chat room)
+High
+2. AI-generated tasks
+- AI generates tasks that are generic (chat words reach 1k)  or based on shared interest and profiles of both of them
+- Complete them to get coins. Coins can be used for in-app store systems
+- Prioritized text based
+High
+3. Smart Chat Room
+-The app appoints the person starting the conversation, and after a minute if they can’t send a greeting, a default response will be sent for them
+-New message notification
+- A mechanism for people to submit to tasks
+High
+4. Profile
+-Users can provide their name, age, profession, picture profile, and a profile with 4 line, each line 10 characters max
+- Key matching information: Age, profession, and profile keywords filtered by AI to show hobby, interests, personality, 
+High
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+3. User Stories
+1. As a User:
+I want to make new friends that shared my interests especially in a new environment
+I want the app to make the conversation more fun so the bonding process becomes exciting
+2. As the System:
+The AI should match the users that fit with each other
+Tasks should be fun and exciting to make the users bond with each other and open up to each other.
+The app should be able to attract users’ psychology (instant gratification,..) while also prompting the users to do as recommended and engage in deeper connections
+
+4. User Flows
+Friend making flow
+The user opens the app → Click "Use friend slot" → Matches and click “Ready”→ Enter Conversation.
+The system matches the user → Put the users in the chat → The app appoints the person starting the conversation, and after a minute if they can’t send a greeting, a default response will be sent for them
+AI Tasks Flow
+App create 5-task list (prioritized text-based tasks) like: "Tell your friend the name of your first pet" with rewards 
+The user clicks the message relating to the tasks →When both people submit, coins are rewarded.
+AI cleared completed tasks and provides additional tasks so that there’re always five tasks that are yet to be completed:
+"What’s your favorite Kpop songs”
+Profile creating flow
+User opens the app and enter profile → They input their PFP, Age, Gender, 4 line description about interests,....(10 words each)
+
+5. Technical Requirements
+5.1 Tech Stack
+
+
+🌐 1. Frontend (User Interface)
+Layer
+Tool
+Purpose
+Framework
+React + Vite
+Fast, modern web framework for building the UI
+Styling
+Tailwind CSS
+Utility-first CSS framework for responsive design
+UI Components
+shadcn/ui
+Pre-built modern UI components (buttons, modals, chat bubbles)
+Real-time client
+Socket.IO (Client)
+Real-time communication for chat and task updates
+Deployment
+Vercel
+Instant deployment, preview links, and performance optimizations
+
+
+🔄 2. Communication Layer
+Tool
+Purpose
+Axios or Fetch API
+REST API calls to the backend (e.g. match requests, profile updates)
+Socket.IO
+Real-time WebSocket communication for chat room and live events
+
+
+🧠 3. AI Middleware
+Layer
+Tool
+Purpose
+API Middleware
+FastAPI (Python)
+Receives frontend requests and routes them to AI, database, etc.
+AI Integration
+Gemini 2.0 API via google-generativeai
+Generates bonding tasks, opening lines, compatibility scoring
+Prompt Engineering
+Custom prompts with user context
+Ensures AI responses match bonding objectives
+Rate limiting / retries
+Optional middleware (e.g. httpx, retry logic)
+Handles API timeouts, limits, etc.
+
+
+🧰 4. Backend (Core Logic & Data Management)
+Layer
+Tool
+Purpose
+Web Framework
+FastAPI
+Main server handling routing, matchmaking, task logic
+Authentication
+JWT / OAuth2 via fastapi-users
+Secures user identity and session handling
+Task System
+Background tasks with FastAPI BackgroundTasks
+For auto-generating and refreshing AI tasks
+WebSocket Backend
+FastAPI WebSocket route
+For real-time chat room support
+
+
+🗄️ 5. Database Layer
+Layer
+Tool
+Purpose
+Primary DB
+PostgreSQL
+Stores user data, profiles, matches, chat logs, task history
+ORM
+SQLAlchemy + Alembic
+Simplifies DB access and schema versioning
+Optional Cache
+Redis
+Stores matchmaking queues, session tokens, etc. (faster lookup)
+
+
+📊 6. Monitoring & Analytics (SKIP in building MVP)
+Tool
+Purpose
+PostHog / Plausible
+Tracks user behavior, flow, and conversion funnel
+Sentry
+Logs frontend/backend errors with stack trace and context
+Prompt Logging
+(Optional) Use DB or tools like PromptLayer
+
+
+🧪 7. DevOps Tooling
+Tool
+Purpose
+GitHub
+Source control and collaboration
+GitHub Actions
+CI/CD pipelines to auto-deploy on push
+Docker (Optional)
+Containerized backend for consistent deployment
+Railway / Render / Fly.io
+Simple backend hosting with Postgres/Redis support
+
+
+🚀 Summary of Flow:
+User interacts with React UI →
+
+
+Sends API request (Axios) or real-time message (Socket.IO) →
+
+
+FastAPI routes request →
+
+
+Either queries PostgreSQL, hits Gemini AI, or both →
+
+
+Sends back data to UI →
+
+
+UI updates, shows new match, task, or message
+
+5.2 Non-Functional Requirements
+
+
+Requirement
+Description
+Performance
+App should load within 2 seconds on mobile browsers, even on 3G connections.
+Scalability
+Support up to 1,000 concurrent active users without chat/message lag.
+Security
+User data must be encrypted at rest (PostgreSQL) and in transit (HTTPS + WSS).
+Availability
+99% uptime guaranteed using Vercel (frontend) and Render (backend + DB).
+Responsiveness
+App must be fully responsive across mobile, tablet, and desktop devices.
+Offline Capability
+AI-generated task list and chat history must remain readable offline via service workers.
+Maintainability
+Code should follow modular, component-based architecture with auto linting and typed APIs.
+Localization-ready
+Support for multiple languages (e.g., English, Vietnamese) via i18n libraries.
+Monitoring
+Logs and errors must be captured using tools like Sentry and Render logs.
+Accessibility
+UI must meet WCAG AA compliance with keyboard navigation and readable contrast.
+Latency
+Chat message roundtrip should not exceed 300ms under average conditions.
+AI Responsiveness
+Gemini-generated tasks should return within 1–2 seconds via async FastAPI call.
+
+
+6. Design & UI
+6.1 Design Guidelines
+Style: 
+Colors: 
+Typography: 
+6.2 Screens
+Home Screen:
+Chat Screen: 
+Notifications: 
+Profile Screen: 
+
+7. Success Metrics
+Metric
+Definition
+Target
+User Engagement
+Percentage of users opening the app daily.
+30% Daily Active Users (DAU)
+Task Completion Rate
+Number of tasks marked as completed per user.
+70% completion rate
+Notifications Interaction
+Percentage of users clicking notifications.
+40% click-through rate
+AI Engagement
+Number of conversations initiated with the AI.
+3-5 chats per user per day
+
+
+
+
+
+
+
+
+8. Risks & Mitigation
+9. Timeline
+
+
+
+
+
+
+
