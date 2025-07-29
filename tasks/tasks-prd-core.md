@@ -97,10 +97,10 @@
   - [x] 1.2 Configure SQLAlchemy with PostgreSQL and create initial migrations
   - [x] 1.3 Implement JWT authentication with fastapi-users
   - [x] 1.4 Set up WebSocket support for real-time chat functionality
-  - [ ] 1.5 Create API route structure and basic CRUD endpoints
-  - [ ] 1.6 Implement configuration management and environment variables
-  - [ ] 1.7 Add CORS middleware and security headers
-  - [ ] 1.8 Set up logging and error handling middleware
+  - [x] 1.5 Create API route structure and basic CRUD endpoints
+  - [x] 1.6 Implement configuration management and environment variables
+  - [x] 1.7 Add CORS middleware and security headers
+  - [x] 1.8 Set up logging and error handling middleware
 
 - [ ] 2.0 User Profile System
   - [ ] 2.1 Create user profile model with name, age, profession, and profile text fields
