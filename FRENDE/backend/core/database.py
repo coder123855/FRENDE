@@ -42,6 +42,19 @@ async def get_async_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
 
+# Session context manager for proper transaction handling
+async def get_session_context():
+    """Context manager for database sessions with proper transaction handling"""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
 # Legacy sync session for compatibility
 def get_db():
     from sqlalchemy.orm import Session

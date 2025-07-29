@@ -1,16 +1,12 @@
-from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, func
-from datetime import datetime, timedelta
 import logging
-import random
-from uuid import uuid4
-
-from models.match import Match
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_, or_
 from models.user import User
-from models.chat import ChatRoom
-from services.chat import chat_service
-from core.websocket import manager
+from models.match import Match
+from core.database import get_async_session
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +16,8 @@ class MatchingService:
     def __init__(self):
         self.matching_queue: List[int] = []
         self.compatibility_cache: Dict[str, int] = {}
+        self.min_compatibility_threshold = settings.MIN_COMPATIBILITY_THRESHOLD
+        self.max_compatibility_score = settings.MAX_COMPATIBILITY_SCORE
     
     async def create_match_request(
         self,
@@ -31,9 +29,8 @@ class MatchingService:
     ) -> Match:
         """Create a new match request"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._create_direct_match(user_id, target_user_id, session)
         
         # Check if user has available slots
         result = await session.execute(
@@ -94,7 +91,7 @@ class MatchingService:
         await session.refresh(match)
         
         # Create chat room
-        await chat_service.create_chat_room(match, session)
+        # await chat_service.create_chat_room(match, session) # This line was removed as per the new_code
         
         logger.info(f"Created direct match {match.id} between users {user1_id} and {user2_id}")
         return match
@@ -134,6 +131,20 @@ class MatchingService:
     ) -> Optional[int]:
         """Find a compatible user from the queue"""
         if not session:
+            async with get_async_session() as session:
+                return await self._find_compatible_user_internal(user_id, community, location, session)
+        
+        return await self._find_compatible_user_internal(user_id, community, location, session)
+
+    async def _find_compatible_user_internal(
+        self,
+        user_id: int,
+        community: Optional[str] = None,
+        location: Optional[str] = None,
+        session: AsyncSession = None
+    ) -> Optional[int]:
+        """Find a compatible user from the queue"""
+        if not session:
             async for db_session in get_async_session():
                 session = db_session
                 break
@@ -155,7 +166,7 @@ class MatchingService:
             # Check if users are compatible
             compatibility = await self._calculate_compatibility(user_id, queue_user_id, session)
             
-            if compatibility >= 50:  # Minimum compatibility threshold
+            if compatibility >= self.min_compatibility_threshold:  # Minimum compatibility threshold
                 return queue_user_id
         
         return None
@@ -246,9 +257,8 @@ class MatchingService:
     ) -> Match:
         """Accept a match request"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._accept_match_internal(match_id, user_id, session)
         
         # Get match
         result = await session.execute(
@@ -279,7 +289,7 @@ class MatchingService:
         await session.refresh(match)
         
         # Start auto-greeting timer
-        await chat_service.start_auto_greeting_timer(match_id, session)
+        # await chat_service.start_auto_greeting_timer(match_id, session) # This line was removed as per the new_code
         
         logger.info(f"Match {match_id} accepted by user {user_id}")
         return match
@@ -292,9 +302,8 @@ class MatchingService:
     ) -> Match:
         """Reject a match request"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._reject_match_internal(match_id, user_id, session)
         
         # Get match
         result = await session.execute(
@@ -327,9 +336,8 @@ class MatchingService:
     ) -> List[Match]:
         """Get matches for a user"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._get_user_matches_internal(user_id, status, session)
         
         query = select(Match).where(
             or_(Match.user1_id == user_id, Match.user2_id == user_id)
@@ -349,9 +357,8 @@ class MatchingService:
     ) -> Optional[Match]:
         """Get detailed match information"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._get_match_details_internal(match_id, user_id, session)
         
         result = await session.execute(
             select(Match).where(
@@ -366,9 +373,8 @@ class MatchingService:
     async def cleanup_expired_matches(self, session: AsyncSession = None):
         """Clean up expired matches"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._cleanup_expired_matches_internal(session)
         
         # Find expired matches
         result = await session.execute(
@@ -386,7 +392,7 @@ class MatchingService:
             match.completed_at = datetime.utcnow()
             
             # Cancel auto-greeting timer
-            await chat_service.cancel_auto_greeting_timer(match.id)
+            # await chat_service.cancel_auto_greeting_timer(match.id) # This line was removed as per the new_code
             
             logger.info(f"Marked match {match.id} as expired")
         

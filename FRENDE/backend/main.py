@@ -125,6 +125,13 @@ def test_security_configuration():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+@app.get("/security/runtime")
+def get_runtime_security_status():
+    """Get runtime security validation status"""
+    from core.security_utils import validate_runtime_security
+    
+    return validate_runtime_security()
+
 @app.get("/websocket-status")
 def websocket_status():
     """Get WebSocket connection status"""

@@ -339,3 +339,45 @@ def get_security_status() -> Dict[str, Any]:
         "security_report": security_monitor.get_security_report(),
         "security_tests": SecurityTester.run_security_tests()
     } 
+
+def validate_runtime_security() -> Dict[str, Any]:
+    """Validate security configuration at runtime"""
+    from core.config import settings
+    
+    issues = []
+    warnings = []
+    
+    # Check JWT secret in production
+    if settings.ENVIRONMENT == "production":
+        if settings.JWT_SECRET_KEY == "your-super-secret-key-change-in-production":
+            issues.append("JWT_SECRET_KEY must be changed in production")
+        
+        if settings.DEBUG:
+            warnings.append("Debug mode is enabled in production")
+        
+        if "localhost" in settings.CORS_ORIGINS or "127.0.0.1" in settings.CORS_ORIGINS:
+            warnings.append("Localhost origins are allowed in production CORS")
+    
+    # Check API keys
+    if settings.GEMINI_API_KEY == "your-gemini-api-key-here":
+        warnings.append("GEMINI_API_KEY is not configured")
+    
+    if settings.EMAIL_API_KEY == "":
+        warnings.append("EMAIL_API_KEY is not configured")
+    
+    if settings.FILE_STORAGE_API_KEY == "":
+        warnings.append("FILE_STORAGE_API_KEY is not configured")
+    
+    # Check security settings
+    if settings.REQUEST_SIZE_LIMIT > 10 * 1024 * 1024:  # 10MB
+        warnings.append("Request size limit is very high")
+    
+    if settings.RATE_LIMIT_REQUESTS > 1000:
+        warnings.append("Rate limit is very high")
+    
+    return {
+        "valid": len(issues) == 0,
+        "issues": issues,
+        "warnings": warnings,
+        "timestamp": datetime.utcnow().isoformat()
+    } 

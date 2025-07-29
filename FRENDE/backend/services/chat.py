@@ -1,27 +1,40 @@
-from typing import List, Optional, Dict
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
-from datetime import datetime, timedelta
 import logging
 import asyncio
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_, or_
 from uuid import uuid4
-from sqlalchemy import func
-
-from models.match import Match
 from models.chat import ChatMessage, ChatRoom
+from models.match import Match
 from models.user import User
 from models.task import Task
 from core.websocket import manager
 from core.database import get_async_session
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
 class ChatService:
     def __init__(self):
+        self.auto_greeting_timeout = settings.AUTO_GREETING_TIMEOUT_SECONDS
+        self.chat_message_max_length = settings.CHAT_MESSAGE_MAX_LENGTH
         self.auto_greeting_tasks: Dict[int, asyncio.Task] = {}
     
-    async def create_chat_room(self, match: Match, session: AsyncSession) -> ChatRoom:
-        """Create a new chat room for a match"""
+    async def create_chat_room(
+        self,
+        match: Match,
+        session: AsyncSession = None
+    ) -> ChatRoom:
+        """Create a chat room for a match"""
+        if not session:
+            async with get_async_session() as session:
+                return await self._create_chat_room_internal(match, session)
+        
+        return await self._create_chat_room_internal(match, session)
+    
+    async def _create_chat_room_internal(self, match: Match, session: AsyncSession) -> ChatRoom:
+        """Internal method to create a chat room"""
         room_id = f"room_{uuid4().hex[:8]}"
         
         chat_room = ChatRoom(
@@ -218,38 +231,63 @@ class ChatService:
         logger.info(f"Started auto-greeting timer for match {match_id}")
     
     async def _auto_greeting_timer(self, match_id: int, session: AsyncSession):
-        """Auto-greeting timer that sends default message after 1 minute"""
+        """Auto-greeting timer that sends a default message after timeout"""
         try:
-            # Wait for 1 minute
-            await asyncio.sleep(60)
+            await asyncio.sleep(self.auto_greeting_timeout)
             
-            # Check if conversation starter has sent a message
+            # Check if match is still active
             result = await session.execute(
-                select(ChatRoom).where(ChatRoom.match_id == match_id)
+                select(Match).where(Match.id == match_id)
             )
-            chat_room = result.scalar_one_or_none()
+            match = result.scalar_one_or_none()
             
-            if chat_room and not chat_room.starter_message_sent:
-                # Get conversation starter user
-                result = await session.execute(
-                    select(User).where(User.id == chat_room.conversation_starter_id)
-                )
-                starter_user = result.scalar_one_or_none()
-                
-                if starter_user:
-                    # Send auto-greeting message
-                    greeting_text = f"Hello, my name is {starter_user.name or starter_user.username}, I am shy and can't think of a cool opening line :( Wanna be friends?"
-                    
-                    await self.send_system_message(match_id, greeting_text, session)
-                    
-                    # Mark auto-greeting as sent
-                    chat_room.auto_greeting_sent = True
-                    await session.commit()
-                    
-                    logger.info(f"Auto-greeting sent for match {match_id}")
+            if not match or match.status != "active":
+                logger.info(f"Match {match_id} is no longer active, skipping auto-greeting")
+                return
+            
+            # Get conversation starter
+            result = await session.execute(
+                select(User).where(User.id == match.conversation_starter_id)
+            )
+            starter = result.scalar_one_or_none()
+            
+            if not starter:
+                logger.warning(f"Conversation starter not found for match {match_id}")
+                return
+            
+            # Send default greeting
+            default_message = f"Hello, my name is {starter.name}, I am shy and can't think of a cool opening line :( Wanna be friends?"
+            
+            message = ChatMessage(
+                match_id=match_id,
+                sender_id=starter.id,
+                message_text=default_message,
+                message_type="text"
+            )
+            
+            session.add(message)
+            await session.commit()
+            
+            # Notify users through WebSocket
+            await manager.broadcast_to_match(
+                match_id,
+                {
+                    "type": "chat_message",
+                    "message": {
+                        "id": message.id,
+                        "sender_id": message.sender_id,
+                        "message_text": message.message_text,
+                        "message_type": message.message_type,
+                        "timestamp": message.created_at.isoformat()
+                    }
+                }
+            )
+            
+            logger.info(f"Sent auto-greeting for match {match_id}")
             
         except asyncio.CancelledError:
             logger.info(f"Auto-greeting timer cancelled for match {match_id}")
+            return
         except Exception as e:
             logger.error(f"Error in auto-greeting timer for match {match_id}: {e}")
         finally:

@@ -113,7 +113,18 @@ class Settings(BaseSettings):
     PERFORMANCE_HEADERS_ENABLED: bool = Field(default=True, description="Enable performance headers")
     RESPONSE_TIME_HEADER: str = Field(default="X-Response-Time", description="Response time header name")
     PROCESSING_TIME_HEADER: str = Field(default="X-Processing-Time", description="Processing time header name")
-    
+
+    # Business Logic Configuration
+    SLOT_PURCHASE_COST: int = Field(default=50, description="Cost in coins to purchase a slot")
+    MIN_COMPATIBILITY_THRESHOLD: int = Field(default=50, description="Minimum compatibility score for matching")
+    MAX_COMPATIBILITY_SCORE: int = Field(default=100, description="Maximum compatibility score")
+    DEFAULT_USER_SLOTS: int = Field(default=2, description="Default number of slots per user")
+    MATCH_EXPIRATION_HOURS: int = Field(default=48, description="Match expiration time in hours")
+    TASK_EXPIRATION_HOURS: int = Field(default=24, description="Task expiration time in hours")
+    AUTO_GREETING_TIMEOUT_SECONDS: int = Field(default=60, description="Auto-greeting timeout in seconds")
+    CHAT_MESSAGE_MAX_LENGTH: int = Field(default=2000, description="Maximum chat message length")
+    PROFILE_TEXT_MAX_LENGTH: int = Field(default=500, description="Maximum profile text length")
+
     # =============================================================================
     # EXTERNAL SERVICES CONFIGURATION
     # =============================================================================
@@ -193,6 +204,38 @@ class Settings(BaseSettings):
                         return v
                     except ValueError:
                         raise ValueError(f"Invalid log rotation size format: {v}")
+        return v
+
+    @validator("LOG_FILE_PATH")
+    def validate_log_file_path(cls, v):
+        """Validate log file path and permissions"""
+        if v:
+            try:
+                from pathlib import Path
+                log_path = Path(v)
+                
+                # Check if directory exists or can be created
+                log_dir = log_path.parent
+                if not log_dir.exists():
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Check if file is writable
+                if log_path.exists():
+                    if not log_path.is_file():
+                        raise ValueError(f"Log path exists but is not a file: {v}")
+                    if not os.access(log_path, os.W_OK):
+                        raise ValueError(f"Log file is not writable: {v}")
+                else:
+                    # Test if we can create the file
+                    try:
+                        log_path.touch()
+                        log_path.unlink()  # Remove test file
+                    except (OSError, PermissionError):
+                        raise ValueError(f"Cannot create log file at: {v}")
+                
+                return v
+            except Exception as e:
+                raise ValueError(f"Invalid log file path {v}: {str(e)}")
         return v
     
     @validator("ERROR_LOG_LEVEL")

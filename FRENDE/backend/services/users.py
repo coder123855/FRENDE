@@ -8,6 +8,8 @@ from models.user import User
 from models.match import Match
 from models.task import Task
 from schemas.user import UserUpdate
+from core.database import get_async_session
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,7 @@ class UserService:
     
     def __init__(self):
         self.slot_reset_interval = timedelta(days=2)
-        self.slot_purchase_cost = 50  # coins
+        self.slot_purchase_cost = settings.SLOT_PURCHASE_COST
     
     async def get_user_profile(
         self,
@@ -25,9 +27,11 @@ class UserService:
     ) -> Optional[User]:
         """Get user profile by ID"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                result = await session.execute(
+                    select(User).where(User.id == user_id)
+                )
+                return result.scalar_one_or_none()
         
         result = await session.execute(
             select(User).where(User.id == user_id)

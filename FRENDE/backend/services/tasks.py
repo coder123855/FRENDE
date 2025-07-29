@@ -1,15 +1,13 @@
-from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, func
-from datetime import datetime, timedelta
 import logging
-import random
-
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_, or_
 from models.task import Task
 from models.match import Match
 from models.user import User
-from services.chat import chat_service
-from core.websocket import manager
+from core.database import get_async_session
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +15,7 @@ class TaskService:
     """Service for managing tasks and task generation"""
     
     def __init__(self):
+        self.task_expiration_hours = settings.TASK_EXPIRATION_HOURS
         self.task_templates = {
             "bonding": [
                 "Tell your friend about your favorite childhood memory",
@@ -48,10 +47,22 @@ class TaskService:
         self,
         match_id: int,
         task_type: str = "bonding",
-        user_interests: Optional[List[str]] = None,
         session: AsyncSession = None
     ) -> Task:
         """Generate a new task for a match"""
+        if not session:
+            async with get_async_session() as session:
+                return await self._generate_task_internal(match_id, task_type, session)
+        
+        return await self._generate_task_internal(match_id, task_type, session)
+    
+    async def _generate_task_internal(
+        self,
+        match_id: int,
+        task_type: str = "bonding",
+        session: AsyncSession = None
+    ) -> Task:
+        """Internal method to generate a task"""
         if not session:
             async for db_session in get_async_session():
                 session = db_session
@@ -72,8 +83,8 @@ class TaskService:
             raise ValueError("Match not found or not active")
         
         # Generate task content
-        if task_type == "interest-based" and user_interests:
-            title, description = await self._generate_interest_based_task(user_interests)
+        if task_type == "interest-based":
+            title, description = await self._generate_interest_based_task(session)
         else:
             title, description = self._generate_template_task(task_type)
         
@@ -108,8 +119,12 @@ class TaskService:
         
         return title, description
     
-    async def _generate_interest_based_task(self, interests: List[str]) -> tuple[str, str]:
+    async def _generate_interest_based_task(self, session: AsyncSession) -> tuple[str, str]:
         """Generate task based on user interests"""
+        # This method needs to be implemented to fetch user interests from the match
+        # For now, it will generate a generic bonding task if no interests are found
+        # In a real application, you would fetch interests from the match or user profiles
+        interests = ["friends", "family", "hobbies", "music", "movies"] # Placeholder
         if not interests:
             return self._generate_template_task("bonding")
         
