@@ -37,7 +37,11 @@ class Settings(BaseSettings):
     
     # CORS Configuration
     CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
+        default_factory=lambda: (
+            ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"]
+            if os.getenv("ENVIRONMENT", "development") == "development"
+            else []
+        ),
         description="Allowed CORS origins"
     )
     CORS_ALLOW_CREDENTIALS: bool = Field(default=True, description="Allow CORS credentials")

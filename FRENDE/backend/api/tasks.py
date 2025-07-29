@@ -17,6 +17,9 @@ from schemas.task import (
 from schemas.common import PaginationParams, SuccessResponse, ErrorResponse
 from services.tasks import task_service
 from services.matching import matching_service
+from core.exceptions import (
+    MatchNotFoundError, TaskNotFoundError, UserNotInMatchError
+)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -66,88 +69,43 @@ async def get_match_tasks(
             detail=f"Error retrieving tasks: {str(e)}"
         )
 
-@router.post("/matches/{match_id}/tasks", response_model=TaskGenerationResponse)
+@router.post("/", response_model=TaskResponse)
 async def generate_task(
-    match_id: int,
-    generation_request: TaskGenerationRequest,
+    task_data: TaskCreate,
     current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Generate a new task for a match"""
     try:
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            match_id, current_user.id, session
-        )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Generate task
         task = await task_service.generate_task(
-            match_id,
-            generation_request.task_type,
-            generation_request.user_interests,
-            session
+            task_data.match_id, task_data.task_type, session
         )
-        
-        return TaskGenerationResponse(
-            task=task,
-            message="Task generated successfully"
-        )
-        
-    except ValueError as e:
+        return task
+    except MatchNotFoundError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error generating task: {str(e)}"
-        )
 
-@router.put("/{task_id}/complete", response_model=TaskCompletionResponse)
+@router.post("/{task_id}/complete", response_model=TaskResponse)
 async def complete_task(
     task_id: int,
-    completion_request: TaskCompletionRequest,
     current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Mark a task as completed by a user"""
+    """Mark a task as completed by the current user"""
     try:
-        # Verify the task belongs to the user
-        task = await task_service.get_task_details(
-            task_id, current_user.id, session
-        )
-        if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found"
-            )
-        
-        # Complete the task
-        completed_task = await task_service.complete_task(
-            task_id, current_user.id, session
-        )
-        
-        return TaskCompletionResponse(
-            task=completed_task,
-            message="Task completed successfully",
-            coins_earned=completed_task.coin_reward if completed_task.is_completed else 0
-        )
-        
-    except ValueError as e:
+        task = await task_service.complete_task(task_id, current_user.id, session)
+        return task
+    except TaskNotFoundError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
-    except Exception as e:
+    except UserNotInMatchError as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error completing task: {str(e)}"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
         )
 
 @router.get("/{task_id}", response_model=TaskRead)

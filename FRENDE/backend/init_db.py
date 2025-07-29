@@ -8,32 +8,69 @@ import os
 import sys
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+import logging
 
-# Add the current directory to the path
-sys.path.append(os.path.dirname(__file__))
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-from core.database import DATABASE_URL, engine
-from models import Base, User, Match, Task, ChatMessage, ChatRoom
+# Add the backend directory to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from core.database import Base, engine
+from models import User, Match, Task, ChatMessage, ChatRoom
 
 def init_database():
-    """Initialize the database by creating all tables"""
-    print("Creating database tables...")
-    
-    # Create all tables
-    Base.metadata.create_all(bind=engine)
-    
-    print("Database tables created successfully!")
-    print(f"Database URL: {DATABASE_URL}")
+    """Initialize the database with tables"""
+    try:
+        logger.info("Creating database tables...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully!")
+        
+        # Get database URL for logging
+        from core.config import settings
+        logger.info(f"Database URL: {settings.DATABASE_URL}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create database tables: {e}")
+        return False
 
 def create_initial_migration():
-    """Create the initial migration using Alembic"""
-    print("Creating initial migration...")
+    """Create initial Alembic migration"""
+    try:
+        logger.info("Creating initial migration...")
+        import subprocess
+        result = subprocess.run(
+            ["alembic", "revision", "--autogenerate", "-m", "Initial migration"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            logger.info("Initial migration created!")
+            return True
+        else:
+            logger.error(f"Failed to create migration: {result.stderr}")
+            return False
+    except Exception as e:
+        logger.error(f"Error creating migration: {e}")
+        return False
+
+def main():
+    """Main initialization function"""
+    logger.info("Initializing Frende database...")
     
-    # This would typically be run with: alembic revision --autogenerate -m "Initial migration"
-    # For now, we'll just create the tables directly
-    print("Initial migration created!")
+    # Create tables
+    if not init_database():
+        return False
+    
+    # Create initial migration
+    if not create_initial_migration():
+        logger.warning("Failed to create initial migration, but database is ready")
+    
+    logger.info("Database initialization complete!")
+    return True
 
 if __name__ == "__main__":
-    print("Initializing Frende database...")
-    init_database()
-    print("Database initialization complete!") 
+    success = main()
+    sys.exit(0 if success else 1) 

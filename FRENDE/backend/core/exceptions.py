@@ -277,26 +277,37 @@ class MatchError(FrendeException):
         )
 
 class TaskError(FrendeException):
-    """Raised when task operations fail"""
-    
-    def __init__(self, message: str = "Task error", 
-                 task_id: Optional[int] = None,
-                 match_id: Optional[int] = None,
-                 operation: Optional[str] = None):
-        details = {}
-        if task_id:
-            details["task_id"] = task_id
-        if match_id:
-            details["match_id"] = match_id
-        if operation:
-            details["operation"] = operation
-        
-        super().__init__(
-            message=message,
-            error_code="TASK_ERROR",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            details=details
-        )
+    """Raised when task-related operations fail"""
+    def __init__(self, message: str, task_id: Optional[int] = None, match_id: Optional[int] = None):
+        super().__init__(message)
+        self.task_id = task_id
+        self.match_id = match_id
+
+class InsufficientCoinsError(FrendeException):
+    """Raised when user doesn't have enough coins for an operation"""
+    def __init__(self, message: str, required_coins: Optional[int] = None, current_coins: Optional[int] = None):
+        super().__init__(message)
+        self.required_coins = required_coins
+        self.current_coins = current_coins
+
+class NoAvailableSlotsError(FrendeException):
+    """Raised when user has no available slots for matching"""
+    def __init__(self, message: str, user_id: Optional[int] = None):
+        super().__init__(message)
+        self.user_id = user_id
+
+class MatchNotPendingError(FrendeException):
+    """Raised when trying to accept/reject a match that's not in pending status"""
+    def __init__(self, message: str, match_id: Optional[int] = None):
+        super().__init__(message)
+        self.match_id = match_id
+
+class UserNotInMatchError(FrendeException):
+    """Raised when a user tries to perform an operation on a match they're not part of"""
+    def __init__(self, message: str, user_id: Optional[int] = None, match_id: Optional[int] = None):
+        super().__init__(message)
+        self.user_id = user_id
+        self.match_id = match_id
 
 # Exception mapping for common HTTP status codes
 EXCEPTION_MAPPING = {

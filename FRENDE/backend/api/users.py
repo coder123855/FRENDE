@@ -13,6 +13,9 @@ from schemas.common import PaginationParams, SuccessResponse, ErrorResponse
 from services.users import user_service
 from services.matching import matching_service
 from services.tasks import task_service
+from core.exceptions import (
+    UserNotFoundError, InsufficientCoinsError, ValidationError
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -35,7 +38,12 @@ async def update_current_user_profile(
             current_user.id, profile_update, session
         )
         return updated_user
-    except ValueError as e:
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -50,7 +58,7 @@ async def get_current_user_stats(
     try:
         stats = await user_service.get_user_stats(current_user.id, session)
         return stats
-    except ValueError as e:
+    except UserNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
@@ -104,9 +112,14 @@ async def purchase_slot(
     try:
         updated_user = await user_service.purchase_slot(current_user.id, session)
         return updated_user
-    except ValueError as e:
+    except InsufficientCoinsError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
 

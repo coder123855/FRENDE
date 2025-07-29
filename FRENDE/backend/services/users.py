@@ -10,6 +10,7 @@ from models.task import Task
 from schemas.user import UserUpdate
 from core.database import get_async_session
 from core.config import settings
+from core.exceptions import UserNotFoundError, InsufficientCoinsError
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,18 @@ class UserService:
     ) -> User:
         """Update user profile"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._update_user_profile_internal(user_id, profile_update, session)
         
+        return await self._update_user_profile_internal(user_id, profile_update, session)
+
+    async def _update_user_profile_internal(
+        self,
+        user_id: int,
+        profile_update: UserUpdate,
+        session: AsyncSession
+    ) -> User:
+        """Internal method to update user profile"""
         # Get user
         result = await session.execute(
             select(User).where(User.id == user_id)
@@ -57,7 +66,7 @@ class UserService:
         user = result.scalar_one_or_none()
         
         if not user:
-            raise ValueError("User not found")
+            raise UserNotFoundError(f"User with ID {user_id} not found")
         
         # Update fields
         update_data = profile_update.dict(exclude_unset=True)
@@ -155,20 +164,33 @@ class UserService:
     ) -> User:
         """Purchase an additional slot using coins"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._purchase_slot_internal(user_id, session)
         
+        return await self._purchase_slot_internal(user_id, session)
+
+    async def _purchase_slot_internal(
+        self,
+        user_id: int,
+        session: AsyncSession
+    ) -> User:
+        """Internal method to purchase slot"""
         # Get user
-        user = await self.get_user_profile(user_id, session)
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
         if not user:
-            raise ValueError("User not found")
+            raise UserNotFoundError(f"User with ID {user_id} not found")
         
-        # Check if user has enough coins
         if user.coins < self.slot_purchase_cost:
-            raise ValueError(f"Insufficient coins. Need {self.slot_purchase_cost} coins to purchase a slot")
+            raise InsufficientCoinsError(
+                f"Insufficient coins. Need {self.slot_purchase_cost} coins to purchase a slot. "
+                f"Current balance: {user.coins} coins"
+            )
         
-        # Purchase slot
+        # Deduct coins and add slot
         user.coins -= self.slot_purchase_cost
         user.available_slots += 1
         

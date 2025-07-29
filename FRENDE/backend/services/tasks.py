@@ -8,6 +8,7 @@ from models.match import Match
 from models.user import User
 from core.database import get_async_session
 from core.config import settings
+from core.exceptions import MatchNotFoundError, TaskNotFoundError, UserNotInMatchError
 
 logger = logging.getLogger(__name__)
 
@@ -18,28 +19,40 @@ class TaskService:
         self.task_expiration_hours = settings.TASK_EXPIRATION_HOURS
         self.task_templates = {
             "bonding": [
-                "Tell your friend about your favorite childhood memory",
-                "Share a funny story that happened to you recently",
-                "What's your biggest fear and why?",
-                "If you could have dinner with anyone, who would it be?",
-                "What's the most embarrassing thing that happened to you?",
-                "Share your biggest dream or goal in life",
-                "What's your favorite way to spend a weekend?",
-                "Tell a joke that always makes you laugh",
-                "What's your favorite food and why?",
-                "Share something you're proud of"
+                "Tell your friend about your first pet",
+                "Share your favorite childhood memory",
+                "What's your dream vacation destination?",
+                "Describe your perfect day",
+                "What's your biggest fear and how do you cope with it?",
+                "Share a funny story from your life",
+                "What's your favorite book and why?",
+                "Describe your ideal friend",
+                "What's your biggest achievement so far?",
+                "Share something you're passionate about"
             ],
             "generic": [
-                "Ask your friend about their day",
-                "Share something interesting you learned today",
-                "What's your favorite movie and why?",
-                "Tell your friend about your hobbies",
-                "Share your favorite music or song",
-                "What's your ideal vacation destination?",
-                "Ask about their family or friends",
-                "Share a book you recently read",
+                "What's your favorite color and why?",
+                "If you could have any superpower, what would it be?",
+                "What's your favorite food?",
+                "Describe your perfect weekend",
+                "What's your favorite movie genre?",
+                "If you could travel anywhere, where would you go?",
                 "What's your favorite season and why?",
-                "Tell about your favorite place to visit"
+                "Describe your ideal job",
+                "What's your biggest goal in life?",
+                "Share something that makes you happy"
+            ],
+            "interest-based": [
+                "What hobbies do you enjoy in your free time?",
+                "What type of music do you listen to?",
+                "Do you enjoy sports? Which ones?",
+                "What's your favorite way to relax?",
+                "Do you like to read? What genres?",
+                "What's your favorite way to spend time with friends?",
+                "Do you enjoy cooking? What's your favorite dish?",
+                "What's your favorite type of art or creative activity?",
+                "Do you enjoy traveling? Where have you been?",
+                "What's your favorite way to learn new things?"
             ]
         }
     
@@ -63,11 +76,6 @@ class TaskService:
         session: AsyncSession = None
     ) -> Task:
         """Internal method to generate a task"""
-        if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
-        
         # Verify match exists and is active
         result = await session.execute(
             select(Match).where(
@@ -80,7 +88,7 @@ class TaskService:
         match = result.scalar_one_or_none()
         
         if not match:
-            raise ValueError("Match not found or not active")
+            raise MatchNotFoundError(f"Match {match_id} not found or not active")
         
         # Generate task content
         if task_type == "interest-based":
@@ -90,21 +98,18 @@ class TaskService:
         
         # Create task
         task = Task(
+            match_id=match_id,
             title=title,
             description=description,
             task_type=task_type,
-            match_id=match_id,
-            coin_reward=random.randint(5, 15),
-            ai_generated=True,
-            expires_at=datetime.utcnow() + timedelta(days=1)
+            status="active",
+            created_at=datetime.utcnow(),
+            expires_at=datetime.utcnow() + timedelta(hours=self.task_expiration_hours)
         )
         
         session.add(task)
         await session.commit()
         await session.refresh(task)
-        
-        # Send task notification via WebSocket
-        await chat_service.send_task_notification(match_id, task, session)
         
         logger.info(f"Generated task {task.id} for match {match_id}")
         return task
@@ -143,10 +148,18 @@ class TaskService:
     ) -> Task:
         """Mark a task as completed by a user"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._complete_task_internal(task_id, user_id, session)
         
+        return await self._complete_task_internal(task_id, user_id, session)
+
+    async def _complete_task_internal(
+        self,
+        task_id: int,
+        user_id: int,
+        session: AsyncSession
+    ) -> Task:
+        """Internal method to complete task"""
         # Get task
         result = await session.execute(
             select(Task).where(Task.id == task_id)
@@ -154,7 +167,7 @@ class TaskService:
         task = result.scalar_one_or_none()
         
         if not task:
-            raise ValueError("Task not found")
+            raise TaskNotFoundError(f"Task {task_id} not found")
         
         # Verify user is part of the match
         result = await session.execute(
@@ -168,27 +181,28 @@ class TaskService:
         match = result.scalar_one_or_none()
         
         if not match:
-            raise ValueError("User not part of this match")
+            raise UserNotInMatchError(f"User {user_id} is not part of match {task.match_id}")
         
-        # Mark task as completed by user
-        task.mark_completed_by_user(user_id, match)
+        # Mark task as completed by this user
+        if task.completed_by_user1 is None and match.user1_id == user_id:
+            task.completed_by_user1 = True
+            task.completed_at_user1 = datetime.utcnow()
+        elif task.completed_by_user2 is None and match.user2_id == user_id:
+            task.completed_by_user2 = True
+            task.completed_at_user2 = datetime.utcnow()
+        else:
+            raise TaskNotFoundError(f"Task {task_id} already completed by user {user_id}")
+        
+        # Check if both users completed the task
+        if task.completed_by_user1 and task.completed_by_user2:
+            task.is_completed = True
+            task.completed_at = datetime.utcnow()
+            
+            # Award coins to both users
+            await self._award_task_coins(task, match, session)
+        
         await session.commit()
         await session.refresh(task)
-        
-        # Send completion notification
-        result = await session.execute(
-            select(User).where(User.id == user_id)
-        )
-        user = result.scalar_one_or_none()
-        
-        if user:
-            await chat_service.send_task_completion_notification(
-                task.match_id, task, user, session
-            )
-        
-        # Award coins if both users completed
-        if task.is_completed:
-            await self._award_task_coins(task, match, session)
         
         logger.info(f"Task {task_id} completed by user {user_id}")
         return task
@@ -225,10 +239,18 @@ class TaskService:
     ) -> List[Task]:
         """Get tasks for a match"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._get_match_tasks_internal(match_id, user_id, session)
         
+        return await self._get_match_tasks_internal(match_id, user_id, session)
+
+    async def _get_match_tasks_internal(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession
+    ) -> List[Task]:
+        """Internal method to get tasks for a match"""
         # Verify user is part of the match
         result = await session.execute(
             select(Match).where(
@@ -241,7 +263,7 @@ class TaskService:
         match = result.scalar_one_or_none()
         
         if not match:
-            raise ValueError("User not part of this match")
+            raise UserNotInMatchError(f"User {user_id} is not part of match {match_id}")
         
         # Get active tasks
         result = await session.execute(
@@ -263,10 +285,18 @@ class TaskService:
     ) -> Optional[Task]:
         """Get detailed task information"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._get_task_details_internal(task_id, user_id, session)
         
+        return await self._get_task_details_internal(task_id, user_id, session)
+
+    async def _get_task_details_internal(
+        self,
+        task_id: int,
+        user_id: int,
+        session: AsyncSession
+    ) -> Optional[Task]:
+        """Internal method to get task details"""
         # Get task
         result = await session.execute(
             select(Task).where(Task.id == task_id)
@@ -295,10 +325,13 @@ class TaskService:
     async def replace_expired_tasks(self, session: AsyncSession = None):
         """Replace expired tasks with new ones"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._replace_expired_tasks_internal(session)
         
+        return await self._replace_expired_tasks_internal(session)
+
+    async def _replace_expired_tasks_internal(self, session: AsyncSession):
+        """Internal method to replace expired tasks"""
         # Find expired tasks
         result = await session.execute(
             select(Task).where(
@@ -332,10 +365,17 @@ class TaskService:
     ) -> Dict[str, Any]:
         """Get task completion history for a user"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._get_task_history_internal(user_id, session)
         
+        return await self._get_task_history_internal(user_id, session)
+
+    async def _get_task_history_internal(
+        self,
+        user_id: int,
+        session: AsyncSession
+    ) -> Dict[str, Any]:
+        """Internal method to get task history"""
         # Get completed tasks
         result = await session.execute(
             select(Task).join(Match).where(

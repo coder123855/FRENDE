@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
+from typing import Optional, List
 from datetime import datetime
 
-from core.auth import current_active_user
-from core.database import get_async_session
+from fastapi_users import current_active_user
 from models.user import User
 from models.match import Match
 from schemas.match import (
@@ -13,6 +12,11 @@ from schemas.match import (
     MatchRejectResponse, CompatibilityScore
 )
 from schemas.common import PaginationParams, SuccessResponse, ErrorResponse
+from core.database import get_async_session
+from core.exceptions import (
+    UserNotFoundError, MatchNotFoundError, NoAvailableSlotsError, 
+    MatchNotPendingError, UserNotInMatchError
+)
 from services.matching import matching_service
 from services.users import user_service
 

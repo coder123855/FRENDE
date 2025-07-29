@@ -7,102 +7,108 @@ Run this script to validate your environment configuration before starting the a
 import sys
 import os
 from pathlib import Path
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Add the backend directory to Python path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from core.config_utils import (
-    check_environment_setup,
+    validate_configuration,
     get_environment_info,
     get_feature_flags,
-    log_configuration_startup
+    get_configuration_summary
 )
 from core.config import settings
 
 def main():
     """Main validation function"""
-    print("🔧 Frende Backend Configuration Validation")
-    print("=" * 50)
+    logger.info("🔧 Frende Backend Configuration Validation")
+    logger.info("=" * 50)
     
-    # Check environment setup
-    setup_status = check_environment_setup()
+    # Validate configuration
+    setup_status = validate_configuration()
     
-    # Display results
     if setup_status["valid"]:
-        print("✅ Configuration is valid!")
+        logger.info("✅ Configuration is valid!")
     else:
-        print("❌ Configuration has errors:")
+        logger.error("❌ Configuration has errors:")
         for error in setup_status["errors"]:
-            print(f"   - {error}")
+            logger.error(f"   - {error}")
     
     # Display warnings
     if setup_status["warnings"]:
-        print("\n⚠️  Warnings:")
+        logger.warning("⚠️  Warnings:")
         for warning in setup_status["warnings"]:
-            print(f"   - {warning}")
+            logger.warning(f"   - {warning}")
     
     # Display environment information
-    print("\n📋 Environment Information:")
+    logger.info("📋 Environment Information:")
     env_info = get_environment_info()
     for key, value in env_info.items():
-        print(f"   {key}: {value}")
+        logger.info(f"   {key}: {value}")
     
     # Display feature flags
-    print("\n🚀 Feature Flags:")
+    logger.info("🚀 Feature Flags:")
     feature_flags = get_feature_flags()
     for feature, enabled in feature_flags.items():
         status = "✓" if enabled else "✗"
-        print(f"   {status} {feature}")
+        logger.info(f"   {status} {feature}")
     
     # Display configuration summary
-    print("\n📊 Configuration Summary:")
-    summary = setup_status["info"]
-    for category, config in summary.items():
+    logger.info("📊 Configuration Summary:")
+    config_summary = get_configuration_summary()
+    for category, config in config_summary.items():
         if isinstance(config, dict):
-            print(f"   {category}:")
+            logger.info(f"   {category}:")
             for key, value in config.items():
-                print(f"     {key}: {value}")
+                logger.info(f"     {key}: {value}")
         else:
-            print(f"   {category}: {config}")
+            logger.info(f"   {category}: {config}")
     
-    # Final status
-    print("\n" + "=" * 50)
+    logger.info("=" * 50)
+    
     if setup_status["valid"]:
-        print("✅ Configuration validation completed successfully!")
-        print("🚀 You can now start the application with: uvicorn main:app --reload")
+        logger.info("✅ Configuration validation completed successfully!")
+        logger.info("🚀 You can now start the application with: uvicorn main:app --reload")
         return 0
     else:
-        print("❌ Configuration validation failed!")
-        print("Please fix the errors above before starting the application.")
+        logger.error("❌ Configuration validation failed!")
+        logger.error("Please fix the errors above before starting the application.")
         return 1
 
 def create_env_file():
     """Create .env file from template"""
-    print("📝 Creating .env file from template...")
-    
-    from core.config_utils import create_env_file_template
-    
-    if create_env_file_template():
-        print("✅ .env file created successfully!")
-        print("📝 Please edit the .env file with your actual values.")
+    try:
+        logger.info("📝 Creating .env file from template...")
+        from core.config_utils import create_env_file_template
+        
+        create_env_file_template()
+        logger.info("✅ .env file created successfully!")
+        logger.info("📝 Please edit the .env file with your actual values.")
         return True
-    else:
-        print("❌ Failed to create .env file!")
+    except Exception as e:
+        logger.error(f"❌ Failed to create .env file: {e}")
         return False
 
+def check_env_file():
+    """Check if .env file exists"""
+    env_path = Path(".env")
+    if not env_path.exists():
+        logger.info("📝 No .env file found!")
+        logger.info("=" * 50)
+        logger.info("⚠️  Continuing with default configuration...")
+        return False
+    return True
+
 if __name__ == "__main__":
-    # Check if .env file exists
-    if not Path(".env").exists():
-        print("📝 No .env file found!")
-        response = input("Would you like to create one from the template? (y/n): ")
-        if response.lower() in ['y', 'yes']:
-            if create_env_file():
-                print("\n" + "=" * 50)
-            else:
-                sys.exit(1)
-        else:
-            print("⚠️  Continuing with default configuration...")
+    # Check for .env file
+    if not check_env_file():
+        create_env_file()
     
     # Run validation
     exit_code = main()

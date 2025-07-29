@@ -7,6 +7,7 @@ from models.user import User
 from models.match import Match
 from core.database import get_async_session
 from core.config import settings
+from core.exceptions import UserNotFoundError, MatchNotFoundError, NoAvailableSlotsError, MatchNotPendingError
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,17 @@ class MatchingService:
         """Create a new match request"""
         if not session:
             async with get_async_session() as session:
-                return await self._create_direct_match(user_id, target_user_id, session)
+                return await self._create_match_request_internal(user_id, target_user_id, session)
         
+        return await self._create_match_request_internal(user_id, target_user_id, session)
+
+    async def _create_match_request_internal(
+        self,
+        user_id: int,
+        target_user_id: Optional[int] = None,
+        session: AsyncSession = None
+    ) -> Match:
+        """Internal method to create match request"""
         # Check if user has available slots
         result = await session.execute(
             select(User).where(User.id == user_id)
@@ -39,14 +49,21 @@ class MatchingService:
         user = result.scalar_one_or_none()
         
         if not user or user.available_slots <= 0:
-            raise ValueError("No available slots for matching")
+            raise NoAvailableSlotsError(f"User {user_id} has no available slots for matching")
         
         if target_user_id:
-            # Direct match request
+            # Direct match with specific user
             return await self._create_direct_match(user_id, target_user_id, session)
         else:
-            # Queue-based matching
-            return await self._create_queue_match(user_id, community, location, session)
+            # Find compatible user from queue
+            compatible_user_id = await self._find_compatible_user(user_id, session=session)
+            if not compatible_user_id:
+                # Add to queue and wait
+                if user_id not in self.matching_queue:
+                    self.matching_queue.append(user_id)
+                raise NoAvailableSlotsError("No compatible users available. Added to matching queue.")
+            
+            return await self._create_direct_match(user_id, compatible_user_id, session)
     
     async def _create_direct_match(
         self,
@@ -55,43 +72,33 @@ class MatchingService:
         session: AsyncSession
     ) -> Match:
         """Create a direct match between two users"""
-        # Check if users exist and are active
+        # Get both users
         result = await session.execute(
-            select(User).where(
-                and_(
-                    User.id.in_([user1_id, user2_id]),
-                    User.is_active == True
-                )
-            )
+            select(User).where(User.id.in_([user1_id, user2_id]))
         )
         users = result.scalars().all()
         
         if len(users) != 2:
-            raise ValueError("One or both users not found or inactive")
-        
-        # Check if match already exists
-        existing_match = await self._get_existing_match(user1_id, user2_id, session)
-        if existing_match:
-            return existing_match
-        
-        # Calculate compatibility score
-        compatibility_score = await self._calculate_compatibility(user1_id, user2_id, session)
+            raise UserNotFoundError("One or both users not found or inactive")
         
         # Create match
         match = Match(
             user1_id=user1_id,
             user2_id=user2_id,
             status="pending",
-            compatibility_score=compatibility_score,
-            expires_at=datetime.utcnow() + timedelta(days=2)
+            created_at=datetime.utcnow()
         )
         
         session.add(match)
         await session.commit()
         await session.refresh(match)
         
-        # Create chat room
-        # await chat_service.create_chat_room(match, session) # This line was removed as per the new_code
+        # Use slot for both users
+        for user in users:
+            user.available_slots -= 1
+            user.total_slots_used += 1
+        
+        await session.commit()
         
         logger.info(f"Created direct match {match.id} between users {user1_id} and {user2_id}")
         return match
@@ -260,36 +267,34 @@ class MatchingService:
             async with get_async_session() as session:
                 return await self._accept_match_internal(match_id, user_id, session)
         
+        return await self._accept_match_internal(match_id, user_id, session)
+
+    async def _accept_match_internal(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession
+    ) -> Match:
+        """Internal method to accept match"""
         # Get match
         result = await session.execute(
-            select(Match).where(
-                and_(
-                    Match.id == match_id,
-                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
-                    Match.status == "pending"
-                )
-            )
+            select(Match).where(Match.id == match_id)
         )
         match = result.scalar_one_or_none()
         
-        if not match:
-            raise ValueError("Match not found or not pending")
+        if not match or match.status != "pending":
+            raise MatchNotPendingError(f"Match {match_id} not found or not in pending status")
         
-        # Update match status
+        if match.user1_id != user_id and match.user2_id != user_id:
+            raise MatchNotFoundError(f"User {user_id} is not part of match {match_id}")
+        
+        # Accept match
         match.status = "active"
-        match.started_at = datetime.utcnow()
-        
-        # Use slot for the accepting user
-        if match.user1_id == user_id:
-            match.slot_used_by_user1 = True
-        else:
-            match.slot_used_by_user2 = True
+        match.accepted_at = datetime.utcnow()
+        match.accepted_by = user_id
         
         await session.commit()
         await session.refresh(match)
-        
-        # Start auto-greeting timer
-        # await chat_service.start_auto_greeting_timer(match_id, session) # This line was removed as per the new_code
         
         logger.info(f"Match {match_id} accepted by user {user_id}")
         return match
@@ -305,23 +310,42 @@ class MatchingService:
             async with get_async_session() as session:
                 return await self._reject_match_internal(match_id, user_id, session)
         
+        return await self._reject_match_internal(match_id, user_id, session)
+
+    async def _reject_match_internal(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession
+    ) -> Match:
+        """Internal method to reject match"""
         # Get match
         result = await session.execute(
-            select(Match).where(
-                and_(
-                    Match.id == match_id,
-                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
-                    Match.status == "pending"
-                )
-            )
+            select(Match).where(Match.id == match_id)
         )
         match = result.scalar_one_or_none()
         
-        if not match:
-            raise ValueError("Match not found or not pending")
+        if not match or match.status != "pending":
+            raise MatchNotPendingError(f"Match {match_id} not found or not in pending status")
         
-        # Update match status
+        if match.user1_id != user_id and match.user2_id != user_id:
+            raise MatchNotFoundError(f"User {user_id} is not part of match {match_id}")
+        
+        # Reject match
         match.status = "rejected"
+        match.rejected_at = datetime.utcnow()
+        match.rejected_by = user_id
+        
+        # Return slots to both users
+        for user_id in [match.user1_id, match.user2_id]:
+            result = await session.execute(
+                select(User).where(User.id == user_id)
+            )
+            user = result.scalar_one_or_none()
+            if user:
+                user.available_slots += 1
+                user.total_slots_used -= 1
+        
         await session.commit()
         await session.refresh(match)
         

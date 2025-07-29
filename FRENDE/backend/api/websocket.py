@@ -85,8 +85,8 @@ async def websocket_endpoint(
         logger.error(f"WebSocket connection error: {e}")
         try:
             await websocket.close(code=4005, reason="Internal server error")
-        except:
-            pass
+        except Exception as close_error:
+            logger.error(f"Failed to close WebSocket connection: {close_error}")
 
 async def handle_websocket_message(user: User, match_id: int, message_data: dict, session: AsyncSession):
     """Handle incoming WebSocket messages"""
