@@ -11,6 +11,8 @@ from schemas.user import UserUpdate
 from core.database import get_async_session
 from core.config import settings
 from core.exceptions import UserNotFoundError, InsufficientCoinsError
+from services.image_processing import image_processing_service
+from services.file_storage import file_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,129 @@ class UserService:
         logger.info(f"Updated profile for user {user_id}")
         return user
     
+    async def update_profile_picture(
+        self,
+        user_id: int,
+        file_content: bytes,
+        filename: str,
+        session: AsyncSession = None
+    ) -> User:
+        """
+        Update user's profile picture
+        
+        Args:
+            user_id: User ID
+            file_content: Raw image file content
+            filename: Original filename
+            session: Database session
+            
+        Returns:
+            Updated user object
+        """
+        if not session:
+            async with get_async_session() as session:
+                return await self._update_profile_picture_internal(user_id, file_content, filename, session)
+        
+        return await self._update_profile_picture_internal(user_id, file_content, filename, session)
+    
+    async def _update_profile_picture_internal(
+        self,
+        user_id: int,
+        file_content: bytes,
+        filename: str,
+        session: AsyncSession
+    ) -> User:
+        """Internal method to update profile picture"""
+        # Get user
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise UserNotFoundError(f"User with ID {user_id} not found")
+        
+        # Validate image
+        is_valid, error_message = image_processing_service.validate_image(file_content, filename)
+        if not is_valid:
+            raise ValueError(error_message)
+        
+        # Process image
+        processed_image = image_processing_service.process_profile_picture(file_content)
+        
+        # Generate filename
+        new_filename = image_processing_service.generate_filename(user_id, filename)
+        
+        # Save to storage
+        file_path = await file_storage_service.save_profile_picture(
+            user_id, new_filename, processed_image
+        )
+        
+        # Clean up old profile picture
+        if user.profile_picture_url:
+            old_filename = user.profile_picture_url.split('/')[-1]
+            await file_storage_service.cleanup_old_profile_pictures(user_id, old_filename)
+        
+        # Update database
+        user.profile_picture_url = file_path
+        user.updated_at = datetime.utcnow()
+        
+        await session.commit()
+        await session.refresh(user)
+        
+        logger.info(f"Updated profile picture for user {user_id}: {file_path}")
+        return user
+    
+    async def delete_profile_picture(
+        self,
+        user_id: int,
+        session: AsyncSession = None
+    ) -> User:
+        """
+        Delete user's profile picture
+        
+        Args:
+            user_id: User ID
+            session: Database session
+            
+        Returns:
+            Updated user object
+        """
+        if not session:
+            async with get_async_session() as session:
+                return await self._delete_profile_picture_internal(user_id, session)
+        
+        return await self._delete_profile_picture_internal(user_id, session)
+    
+    async def _delete_profile_picture_internal(
+        self,
+        user_id: int,
+        session: AsyncSession
+    ) -> User:
+        """Internal method to delete profile picture"""
+        # Get user
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise UserNotFoundError(f"User with ID {user_id} not found")
+        
+        # Delete from storage
+        if user.profile_picture_url:
+            await file_storage_service.delete_profile_picture(user.profile_picture_url)
+        
+        # Update database
+        user.profile_picture_url = None
+        user.updated_at = datetime.utcnow()
+        
+        await session.commit()
+        await session.refresh(user)
+        
+        logger.info(f"Deleted profile picture for user {user_id}")
+        return user
+    
     async def get_user_stats(
         self,
         user_id: int,
@@ -99,63 +224,44 @@ class UserService:
         # Get match statistics
         result = await session.execute(
             select(func.count(Match.id)).where(
-                or_(Match.user1_id == user_id, Match.user2_id == user_id)
+                and_(
+                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
+                    Match.status == "accepted"
+                )
             )
         )
         total_matches = result.scalar() or 0
         
+        # Get task completion statistics
         result = await session.execute(
-            select(func.count(Match.id)).where(
+            select(func.count(Task.id)).where(
                 and_(
-                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
-                    Match.status == "active"
-                )
-            )
-        )
-        active_matches = result.scalar() or 0
-        
-        result = await session.execute(
-            select(func.count(Match.id)).where(
-                and_(
-                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
-                    Match.status == "completed"
-                )
-            )
-        )
-        completed_matches = result.scalar() or 0
-        
-        # Get task statistics
-        result = await session.execute(
-            select(func.count(Task.id)).join(Match).where(
-                and_(
-                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
+                    or_(Task.user1_id == user_id, Task.user2_id == user_id),
                     Task.is_completed == True
                 )
             )
         )
         completed_tasks = result.scalar() or 0
         
-        result = await session.execute(
-            select(func.sum(Task.coin_reward)).join(Match).where(
-                and_(
-                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
-                    Task.is_completed == True
-                )
-            )
-        )
-        total_coins_earned = result.scalar() or 0
-        
         return {
             "user_id": user_id,
             "total_matches": total_matches,
-            "active_matches": active_matches,
-            "completed_matches": completed_matches,
             "completed_tasks": completed_tasks,
-            "total_coins_earned": total_coins_earned,
             "available_slots": user.available_slots,
             "total_slots_used": user.total_slots_used,
-            "current_coins": user.coins
+            "coins": user.coins,
+            "profile_completion": self._calculate_profile_completion(user)
         }
+    
+    def _calculate_profile_completion(self, user: User) -> int:
+        """Calculate profile completion percentage"""
+        fields = [
+            user.name, user.age, user.profession, 
+            user.profile_text, user.profile_picture_url,
+            user.community, user.location
+        ]
+        completed_fields = sum(1 for field in fields if field is not None)
+        return int((completed_fields / len(fields)) * 100)
     
     async def purchase_slot(
         self,
@@ -184,15 +290,16 @@ class UserService:
         if not user:
             raise UserNotFoundError(f"User with ID {user_id} not found")
         
+        # Check if user has enough coins
         if user.coins < self.slot_purchase_cost:
             raise InsufficientCoinsError(
-                f"Insufficient coins. Need {self.slot_purchase_cost} coins to purchase a slot. "
-                f"Current balance: {user.coins} coins"
+                f"Insufficient coins. Required: {self.slot_purchase_cost}, Available: {user.coins}"
             )
         
-        # Deduct coins and add slot
+        # Purchase slot
         user.coins -= self.slot_purchase_cost
         user.available_slots += 1
+        user.updated_at = datetime.utcnow()
         
         await session.commit()
         await session.refresh(user)
@@ -208,25 +315,26 @@ class UserService:
                 break
         
         # Find users with expired slots
+        cutoff_date = datetime.utcnow() - self.slot_reset_interval
+        
         result = await session.execute(
             select(User).where(
                 and_(
                     User.available_slots < 2,
-                    User.updated_at < datetime.utcnow() - self.slot_reset_interval
+                    User.updated_at < cutoff_date
                 )
             )
         )
+        
         users_to_reset = result.scalars().all()
         
         for user in users_to_reset:
-            # Reset slots to default (2)
             user.available_slots = 2
-            user.total_slots_used = 0
             user.updated_at = datetime.utcnow()
-            
-            logger.info(f"Reset slots for user {user.id}")
         
-        await session.commit()
+        if users_to_reset:
+            await session.commit()
+            logger.info(f"Reset slots for {len(users_to_reset)} users")
     
     async def use_slot(
         self,
@@ -240,9 +348,13 @@ class UserService:
                 break
         
         # Get user
-        user = await self.get_user_profile(user_id, session)
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
         if not user:
-            raise ValueError("User not found")
+            return False
         
         # Check if user has available slots
         if user.available_slots <= 0:
@@ -251,6 +363,7 @@ class UserService:
         # Use slot
         user.available_slots -= 1
         user.total_slots_used += 1
+        user.updated_at = datetime.utcnow()
         
         await session.commit()
         await session.refresh(user)
@@ -264,7 +377,7 @@ class UserService:
         status: Optional[str] = None,
         session: AsyncSession = None
     ) -> List[Match]:
-        """Get matches for a user"""
+        """Get user's matches"""
         if not session:
             async for db_session in get_async_session():
                 session = db_session
@@ -285,18 +398,17 @@ class UserService:
         user_id: int,
         session: AsyncSession = None
     ) -> List[Task]:
-        """Get active tasks for a user"""
+        """Get user's active tasks"""
         if not session:
             async for db_session in get_async_session():
                 session = db_session
                 break
         
         result = await session.execute(
-            select(Task).join(Match).where(
+            select(Task).where(
                 and_(
-                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
-                    Task.is_completed == False,
-                    Task.expires_at > datetime.utcnow()
+                    or_(Task.user1_id == user_id, Task.user2_id == user_id),
+                    Task.is_completed == False
                 )
             )
         )
@@ -308,14 +420,14 @@ class UserService:
         current_user_id: int,
         session: AsyncSession = None
     ) -> List[User]:
-        """Search for users by name, username, or interests"""
+        """Search for users by name, username, or profile text"""
         if not session:
             async for db_session in get_async_session():
                 session = db_session
                 break
         
-        # Search in name, username, and profile text
         search_term = f"%{query}%"
+        
         result = await session.execute(
             select(User).where(
                 and_(
@@ -324,9 +436,7 @@ class UserService:
                     or_(
                         User.name.ilike(search_term),
                         User.username.ilike(search_term),
-                        User.profile_text.ilike(search_term),
-                        User.community.ilike(search_term),
-                        User.location.ilike(search_term)
+                        User.profile_text.ilike(search_term)
                     )
                 )
             )

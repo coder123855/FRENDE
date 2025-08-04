@@ -66,16 +66,23 @@ def validate_required_config() -> List[str]:
 
 def validate_database_connection() -> bool:
     """
-    Validate database connection configuration.
+    Validate that the database connection is working.
     
     Returns:
         True if database configuration is valid
     """
     try:
         from core.database import engine
+        from sqlalchemy import text
+        import asyncio
+        
         # Test connection by creating a simple query
-        with engine.connect() as conn:
-            conn.execute("SELECT 1")
+        async def test_connection():
+            async with engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
+        
+        # Run the async test
+        asyncio.run(test_connection())
         return True
     except Exception as e:
         logger.error(f"Database connection validation failed: {e}")

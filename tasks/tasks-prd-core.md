@@ -103,10 +103,10 @@
   - [x] 1.8 Set up logging and error handling middleware
 
 - [ ] 2.0 User Profile System
-  - [ ] 2.1 Create user profile model with name, age, profession, and profile text fields
-  - [ ] 2.2 Implement profile picture upload with validation (320x320px, JPEG/PNG, <30MB)
-  - [ ] 2.3 Add client-side image cropping and circular display functionality
-  - [ ] 2.4 Create default avatar (gray silhouette) for users without profile pictures
+  - [x] 2.1 Create user profile model with name, age, profession, and profile text fields
+  - [x] 2.2 Implement profile picture upload with validation (320x320px, JPEG/PNG, <30MB)
+  - [x] 2.3 Add client-side image cropping and circular display functionality
+  - [x] 2.4 Create default avatar (gray silhouette) for users without profile pictures
   - [ ] 2.5 Implement profile editing form with validation (500 char limit for text)
   - [ ] 2.6 Add profile picture change functionality with proper cleanup
   - [ ] 2.7 Create profile display component with responsive design

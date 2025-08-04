@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from core.config import settings
 from core.config_utils import log_configuration_startup, check_environment_setup
 from core.logging_config import setup_logging, get_logger
@@ -16,6 +17,7 @@ from api.tasks import router as tasks_router
 from api.chat import router as chat_router
 import logging
 from datetime import datetime
+import os
 
 # Setup logging first
 setup_logging()
@@ -43,7 +45,7 @@ app = FastAPI(
 register_exception_handlers(app)
 
 # Apply complete middleware stack
-app = create_middleware_stack(app)
+# app = create_middleware_stack(app)
 
 # Add CORS middleware with enhanced configuration
 app.add_middleware(
@@ -54,6 +56,11 @@ app.add_middleware(
     allow_headers=settings.get_cors_headers(),
     max_age=settings.CORS_MAX_AGE,
 )
+
+# Mount static files for uploaded images
+uploads_dir = "uploads"
+if os.path.exists(uploads_dir):
+    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 # Include routers
 app.include_router(auth_router)

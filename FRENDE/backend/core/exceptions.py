@@ -100,6 +100,39 @@ class ResourceNotFoundError(FrendeException):
             details=details
         )
 
+class UserNotFoundError(ResourceNotFoundError):
+    """Raised when a user is not found"""
+    
+    def __init__(self, message: str = "User not found", user_id: Optional[int] = None):
+        super().__init__(
+            message=message,
+            resource_type="user",
+            resource_id=str(user_id) if user_id else None
+        )
+        self.user_id = user_id
+
+class MatchNotFoundError(ResourceNotFoundError):
+    """Raised when a match is not found"""
+    
+    def __init__(self, message: str = "Match not found", match_id: Optional[int] = None):
+        super().__init__(
+            message=message,
+            resource_type="match",
+            resource_id=str(match_id) if match_id else None
+        )
+        self.match_id = match_id
+
+class TaskNotFoundError(ResourceNotFoundError):
+    """Raised when a task is not found"""
+    
+    def __init__(self, message: str = "Task not found", task_id: Optional[int] = None):
+        super().__init__(
+            message=message,
+            resource_type="task",
+            resource_id=str(task_id) if task_id else None
+        )
+        self.task_id = task_id
+
 class DatabaseError(FrendeException):
     """Raised when database operations fail"""
     

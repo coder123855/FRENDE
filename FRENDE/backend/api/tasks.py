@@ -14,7 +14,6 @@ from schemas.task import (
     TaskGenerationRequest, TaskGenerationResponse,
     TaskHistoryResponse
 )
-from schemas.common import PaginationParams, SuccessResponse, ErrorResponse
 from services.tasks import task_service
 from services.matching import matching_service
 from core.exceptions import (
@@ -69,7 +68,7 @@ async def get_match_tasks(
             detail=f"Error retrieving tasks: {str(e)}"
         )
 
-@router.post("/", response_model=TaskResponse)
+@router.post("/", response_model=TaskRead)
 async def generate_task(
     task_data: TaskCreate,
     current_user: User = Depends(current_active_user),
@@ -87,7 +86,7 @@ async def generate_task(
             detail=str(e)
         )
 
-@router.post("/{task_id}/complete", response_model=TaskResponse)
+@router.post("/{task_id}/complete", response_model=TaskRead)
 async def complete_task(
     task_id: int,
     current_user: User = Depends(current_active_user),
@@ -102,10 +101,10 @@ async def complete_task(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
-    except UserNotInMatchError as e:
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error completing task: {str(e)}"
         )
 
 @router.get("/{task_id}", response_model=TaskRead)
@@ -114,26 +113,19 @@ async def get_task_details(
     current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Get detailed information about a specific task"""
+    """Get details of a specific task"""
     try:
-        task = await task_service.get_task_details(
-            task_id, current_user.id, session
-        )
-        
-        if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found"
-            )
-        
+        task = await task_service.get_task(task_id, current_user.id, session)
         return task
-        
-    except HTTPException:
-        raise
+    except TaskNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving task details: {str(e)}"
+            detail=f"Error retrieving task: {str(e)}"
         )
 
 @router.delete("/{task_id}")
@@ -142,36 +134,15 @@ async def replace_task(
     current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Replace/remove a task"""
+    """Replace a task with a new one"""
     try:
-        # Verify the task belongs to the user
-        task = await task_service.get_task_details(
-            task_id, current_user.id, session
+        await task_service.replace_task(task_id, current_user.id, session)
+        return {"message": "Task replaced successfully"}
+    except TaskNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
         )
-        if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found"
-            )
-        
-        # Mark task as expired
-        task.expires_at = datetime.utcnow()
-        await session.commit()
-        
-        # Generate new task to replace it
-        new_task = await task_service.generate_task(
-            task.match_id,
-            task.task_type,
-            session=session
-        )
-        
-        return SuccessResponse(
-            message="Task replaced successfully",
-            data={"new_task_id": new_task.id}
-        )
-        
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -183,11 +154,12 @@ async def get_task_history(
     current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Get current user's task completion history"""
+    """Get task completion history for the current user"""
     try:
-        history = await task_service.get_task_history(current_user.id, session)
+        history = await task_service.get_user_task_history(
+            current_user.id, session
+        )
         return history
-        
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -200,7 +172,7 @@ async def get_active_tasks(
     current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Get active tasks for a match"""
+    """Get active tasks for a specific match"""
     try:
         # Verify user is part of the match
         match = await matching_service.get_match_details(
@@ -212,15 +184,15 @@ async def get_active_tasks(
                 detail="Match not found"
             )
         
-        # Get active tasks
-        tasks = await task_service.get_match_tasks(
+        # Get active tasks for the match
+        active_tasks = await task_service.get_active_tasks(
             match_id, current_user.id, session
         )
         
         return {
-            "tasks": tasks,
-            "total": len(tasks),
-            "match_id": match_id
+            "match_id": match_id,
+            "active_tasks": active_tasks,
+            "total_active": len(active_tasks)
         }
         
     except HTTPException:
@@ -250,21 +222,19 @@ async def auto_generate_tasks(
                 detail="Match not found"
             )
         
-        generated_tasks = []
-        for i in range(count):
-            task = await task_service.generate_task(
-                match_id,
-                "bonding",  # Default to bonding tasks
-                session=session
-            )
-            generated_tasks.append(task)
+        # Generate multiple tasks
+        generated_tasks = await task_service.auto_generate_tasks(
+            match_id, count, session
+        )
         
         return {
-            "message": f"Generated {count} tasks successfully",
-            "tasks": generated_tasks,
-            "total_generated": len(generated_tasks)
+            "match_id": match_id,
+            "generated_tasks": generated_tasks,
+            "count": len(generated_tasks)
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

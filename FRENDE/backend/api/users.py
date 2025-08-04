@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
@@ -47,6 +47,63 @@ async def update_current_user_profile(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
+        )
+
+@router.post("/me/profile-picture", response_model=UserRead)
+async def upload_profile_picture(
+    file: UploadFile = File(..., description="Profile picture file (JPEG/PNG, max 30MB)"),
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Upload profile picture"""
+    try:
+        # Read file content
+        file_content = await file.read()
+        
+        # Update profile picture
+        updated_user = await user_service.update_profile_picture(
+            current_user.id, file_content, file.filename, session
+        )
+        
+        return updated_user
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error uploading profile picture: {str(e)}"
+        )
+
+@router.delete("/me/profile-picture", response_model=UserRead)
+async def delete_profile_picture(
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Delete profile picture"""
+    try:
+        updated_user = await user_service.delete_profile_picture(
+            current_user.id, session
+        )
+        return updated_user
+        
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting profile picture: {str(e)}"
         )
 
 @router.get("/me/stats")
