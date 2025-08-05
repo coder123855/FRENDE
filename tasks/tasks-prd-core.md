@@ -117,10 +117,10 @@
   - [x] 3.2 Create compatibility algorithm with community, location, interests, and age ranking
   - [x] 3.3 Add predefined community and location selection options
   - [x] 3.4 Implement matching queue and algorithm service
-  - [ ] 3.5 Create match request and acceptance flow
-  - [ ] 3.6 Add slot purchase functionality with coin system
-  - [ ] 3.7 Implement match status tracking and expiration logic
-  - [ ] 3.8 Create matching interface with user cards and compatibility display
+  - [x] 3.5 Create match request and acceptance flow
+  - [x] 3.6 Add slot purchase functionality with coin system
+  - [x] 3.7 Implement match status tracking and expiration logic
+  - [x] 3.8 Create matching interface with user cards and compatibility display
 
 - [ ] 4.0 AI-Generated Tasks System
   - [ ] 4.1 Integrate Gemini 2.0 API for task generation

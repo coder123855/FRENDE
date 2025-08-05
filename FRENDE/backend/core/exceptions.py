@@ -342,6 +342,36 @@ class UserNotInMatchError(FrendeException):
         self.user_id = user_id
         self.match_id = match_id
 
+class MatchRequestNotFoundError(ResourceNotFoundError):
+    """Raised when a match request is not found"""
+    
+    def __init__(self, message: str = "Match request not found", request_id: Optional[int] = None):
+        super().__init__(
+            message=message,
+            resource_type="match_request",
+            resource_id=str(request_id) if request_id else None
+        )
+        self.request_id = request_id
+
+class DuplicateRequestError(FrendeException):
+    """Raised when trying to create a duplicate match request"""
+    
+    def __init__(self, message: str = "Duplicate match request", 
+                 sender_id: Optional[int] = None,
+                 receiver_id: Optional[int] = None):
+        details = {}
+        if sender_id:
+            details["sender_id"] = sender_id
+        if receiver_id:
+            details["receiver_id"] = receiver_id
+        
+        super().__init__(
+            message=message,
+            error_code="DUPLICATE_REQUEST_ERROR",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=details
+        )
+
 class QueueEntryNotFoundError(ResourceNotFoundError):
     """Raised when a queue entry is not found"""
     

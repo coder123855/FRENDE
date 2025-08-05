@@ -17,18 +17,22 @@ logger = logging.getLogger(__name__)
 # Add the backend directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from core.database import Base, engine
-from models import User, Match, Task, ChatMessage, ChatRoom
+from core.database import Base, engine, get_async_session
+from models import User, Match, Task, ChatMessage, ChatRoom, MatchRequest
 
 def init_database():
     """Initialize the database with tables"""
     try:
         logger.info("Creating database tables...")
-        Base.metadata.create_all(bind=engine)
+        # Use sync engine for table creation
+        from sqlalchemy import create_engine
+        from core.config import settings
+        
+        # Create sync engine for table creation
+        sync_engine = create_engine(settings.DATABASE_URL.replace("+asyncpg", ""))
+        Base.metadata.create_all(bind=sync_engine)
         logger.info("Database tables created successfully!")
         
-        # Get database URL for logging
-        from core.config import settings
         logger.info(f"Database URL: {settings.DATABASE_URL}")
         
         return True

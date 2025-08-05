@@ -4,6 +4,7 @@ from .match import Match
 from .task import Task
 from .chat import ChatMessage, ChatRoom
 from .queue_entry import QueueEntry
+from .match_request import MatchRequest
 from core.database import Base
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "Task",
     "ChatMessage",
     "ChatRoom",
-    "QueueEntry"
+    "QueueEntry",
+    "MatchRequest"
 ] 

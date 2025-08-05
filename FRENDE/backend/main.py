@@ -16,6 +16,7 @@ from api.matches import router as matches_router
 from api.tasks import router as tasks_router
 from api.chat import router as chat_router
 from api.queue import router as queue_router
+from api.match_requests import router as match_requests_router
 import logging
 from datetime import datetime
 import os
@@ -71,6 +72,7 @@ app.include_router(matches_router)
 app.include_router(tasks_router)
 app.include_router(chat_router)
 app.include_router(queue_router)
+app.include_router(match_requests_router)
 
 @app.on_event("startup")
 async def startup_event():
