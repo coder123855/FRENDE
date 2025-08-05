@@ -302,12 +302,57 @@ async def get_task_history(
     current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Get current user's task completion history"""
+    """Get current user's task history"""
     try:
-        history = await task_service.get_task_history(current_user.id, session)
-        return history
+        tasks = await user_service.get_user_tasks(current_user.id, session)
+        return {
+            "tasks": tasks,
+            "total": len(tasks)
+        }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving task history: {str(e)}"
+        )
+
+@router.get("/me/profile-analysis")
+async def get_profile_analysis(
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Get current user's profile analysis with parsed interests and keywords"""
+    try:
+        analysis = await user_service.get_profile_keywords(current_user)
+        return {
+            "user_id": current_user.id,
+            "analysis": analysis,
+            "profile_completion": user_service._calculate_profile_completion(current_user)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error analyzing profile: {str(e)}"
+        )
+
+@router.post("/me/profile-analysis/refresh")
+async def refresh_profile_analysis(
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Refresh current user's profile analysis"""
+    try:
+        analysis = await user_service.update_profile_with_parsed_data(current_user.id, session)
+        return {
+            "message": "Profile analysis refreshed successfully",
+            "analysis": analysis
+        }
+    except UserNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error refreshing profile analysis: {str(e)}"
         ) 

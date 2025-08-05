@@ -342,6 +342,17 @@ class UserNotInMatchError(FrendeException):
         self.user_id = user_id
         self.match_id = match_id
 
+class QueueEntryNotFoundError(ResourceNotFoundError):
+    """Raised when a queue entry is not found"""
+    
+    def __init__(self, message: str = "Queue entry not found", user_id: Optional[int] = None):
+        super().__init__(
+            message=message,
+            resource_type="queue_entry",
+            resource_id=str(user_id) if user_id else None
+        )
+        self.user_id = user_id
+
 # Exception mapping for common HTTP status codes
 EXCEPTION_MAPPING = {
     400: ValidationError,

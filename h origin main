@@ -1,0 +1,5 @@
+[33m1f5ad8c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m feat: Complete Tasks 2.2-2.4 - Profile Picture Upload and Default Avatar System
+[33me0adb96[m[33m ([m[1;31morigin/main[m[33m)[m fix: Resolve all critical and medium priority codebase issues
+[33ma854853[m fix: Resolve critical codebase issues and improve production readiness
+[33ma2f799b[m feat: Complete backend infrastructure setup (tasks 1.1-1.8)
+[33m19f91a4[m feat: Complete backend infrastructure setup - Add database models, authentication, WebSocket support, and API endpoints - Implement user, match, task, and chat models - Add JWT authentication with fastapi-users - Set up WebSocket for real-time chat - Create comprehensive API routes for all features - Add Alembic migrations for database schema

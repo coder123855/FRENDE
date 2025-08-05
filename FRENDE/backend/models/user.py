@@ -26,13 +26,18 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     # Matching preferences
     community = Column(String(100), nullable=True)
     location = Column(String(100), nullable=True)
+    interests = Column(Text, nullable=True)  # JSON string of interest tags
+    age_preference_min = Column(Integer, nullable=True)
+    age_preference_max = Column(Integer, nullable=True)
     
     # Slot system
     available_slots = Column(Integer, default=2)
     total_slots_used = Column(Integer, default=0)
+    slot_reset_time = Column(DateTime(timezone=True), nullable=True)
     
     # Coin system
     coins = Column(Integer, default=0)
+    last_slot_purchase = Column(DateTime(timezone=True), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

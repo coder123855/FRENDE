@@ -2,8 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
+import Select from './ui/select';
+import MultiSelect from './ui/multi-select';
 import ImageUpload from './ImageUpload';
 import Avatar from './ui/avatar';
+import { useCompatibilityOptions } from '../hooks/useCompatibilityOptions';
+import { userAPI } from '../lib/api';
 
 const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
   const [formData, setFormData] = useState({
@@ -12,11 +16,26 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
     profession: '',
     profile_text: '',
     community: '',
-    location: ''
+    location: '',
+    interests: [],
+    age_preference_min: '',
+    age_preference_max: ''
   });
   const [profilePictureUrl, setProfilePictureUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  
+  // Get compatibility options
+  const {
+    getCommunityOptions,
+    getLocationOptions,
+    getInterestOptions,
+    parseInterests,
+    stringifyInterests,
+    validateAgePreferences,
+    loading: optionsLoading,
+    error: optionsError
+  } = useCompatibilityOptions();
 
   useEffect(() => {
     if (user) {
@@ -26,11 +45,14 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
         profession: user.profession || '',
         profile_text: user.profile_text || '',
         community: user.community || '',
-        location: user.location || ''
+        location: user.location || '',
+        interests: parseInterests(user.interests),
+        age_preference_min: user.age_preference_min || '',
+        age_preference_max: user.age_preference_max || ''
       });
       setProfilePictureUrl(user.profile_picture_url || '');
     }
-  }, [user]);
+  }, [user, parseInterests]);
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({
@@ -56,6 +78,15 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
       return 'Profile text must be 500 characters or less.';
     }
     
+    // Validate age preferences
+    const ageError = validateAgePreferences(
+      formData.age_preference_min ? parseInt(formData.age_preference_min) : null,
+      formData.age_preference_max ? parseInt(formData.age_preference_max) : null
+    );
+    if (ageError) {
+      return ageError;
+    }
+    
     return null;
   };
 
@@ -71,28 +102,18 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
 
     setSaving(true);
     try {
-      const response = await fetch('/api/users/me', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          ...formData,
-          age: formData.age ? parseInt(formData.age) : null,
-          profile_picture_url: profilePictureUrl
-        }),
+      const response = await userAPI.updateProfile({
+        ...formData,
+        age: formData.age ? parseInt(formData.age) : null,
+        age_preference_min: formData.age_preference_min ? parseInt(formData.age_preference_min) : null,
+        age_preference_max: formData.age_preference_max ? parseInt(formData.age_preference_max) : null,
+        interests: stringifyInterests(formData.interests),
+        profile_picture_url: profilePictureUrl
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to update profile');
-      }
-
-      const updatedUser = await response.json();
-      onSave(updatedUser);
+      onSave(response.data);
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message || 'Failed to update profile');
     } finally {
       setSaving(false);
     }
@@ -176,13 +197,16 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
             <label htmlFor="community" className="block text-sm font-medium text-gray-700 mb-1">
               Community
             </label>
-            <Input
-              id="community"
-              type="text"
+            <Select
+              options={getCommunityOptions()}
               value={formData.community}
-              onChange={(e) => handleInputChange('community', e.target.value)}
-              placeholder="Enter your community"
-              disabled={saving}
+              onChange={(value) => handleInputChange('community', value)}
+              placeholder="Select your community"
+              disabled={saving || optionsLoading}
+              loading={optionsLoading}
+              allowCustom={true}
+              customPlaceholder="Enter custom community"
+              error={optionsError}
             />
           </div>
 
@@ -190,13 +214,16 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
             <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-1">
               Location
             </label>
-            <Input
-              id="location"
-              type="text"
+            <Select
+              options={getLocationOptions()}
               value={formData.location}
-              onChange={(e) => handleInputChange('location', e.target.value)}
-              placeholder="Enter your location"
-              disabled={saving}
+              onChange={(value) => handleInputChange('location', value)}
+              placeholder="Select your location"
+              disabled={saving || optionsLoading}
+              loading={optionsLoading}
+              allowCustom={true}
+              customPlaceholder="Enter custom location"
+              error={optionsError}
             />
           </div>
         </div>
@@ -217,6 +244,69 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
           />
           <div className="text-xs text-gray-500 mt-1 text-right">
             {formData.profile_text.length}/500 characters
+          </div>
+        </div>
+
+        {/* Interests Section */}
+        <div>
+          <label htmlFor="interests" className="block text-sm font-medium text-gray-700 mb-1">
+            Interests
+          </label>
+          <MultiSelect
+            options={getInterestOptions()}
+            value={formData.interests}
+            onChange={(value) => handleInputChange('interests', value)}
+            placeholder="Select your interests"
+            disabled={saving || optionsLoading}
+            loading={optionsLoading}
+            allowCustom={true}
+            customPlaceholder="Enter custom interest"
+            maxSelections={10}
+            error={optionsError}
+          />
+          <div className="text-xs text-gray-500 mt-1">
+            Select up to 10 interests that describe you
+          </div>
+        </div>
+
+        {/* Age Preferences Section */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="age_preference_min" className="block text-sm font-medium text-gray-700 mb-1">
+              Minimum Age Preference
+            </label>
+            <Input
+              id="age_preference_min"
+              type="number"
+              min="18"
+              max="100"
+              value={formData.age_preference_min}
+              onChange={(e) => handleInputChange('age_preference_min', e.target.value)}
+              placeholder="18"
+              disabled={saving}
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              Minimum age for potential matches
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="age_preference_max" className="block text-sm font-medium text-gray-700 mb-1">
+              Maximum Age Preference
+            </label>
+            <Input
+              id="age_preference_max"
+              type="number"
+              min="18"
+              max="100"
+              value={formData.age_preference_max}
+              onChange={(e) => handleInputChange('age_preference_max', e.target.value)}
+              placeholder="100"
+              disabled={saving}
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              Maximum age for potential matches
+            </div>
           </div>
         </div>
 

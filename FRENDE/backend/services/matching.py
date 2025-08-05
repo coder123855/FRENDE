@@ -1,4 +1,5 @@
 import logging
+import random
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -171,9 +172,9 @@ class MatchingService:
                 continue
             
             # Check if users are compatible
-            compatibility = await self._calculate_compatibility(user_id, queue_user_id, session)
+            compatibility_result = await self._calculate_compatibility(user_id, queue_user_id, session)
             
-            if compatibility >= self.min_compatibility_threshold:  # Minimum compatibility threshold
+            if compatibility_result["score"] >= self.min_compatibility_threshold:  # Minimum compatibility threshold
                 return queue_user_id
         
         return None
@@ -183,8 +184,8 @@ class MatchingService:
         user1_id: int,
         user2_id: int,
         session: AsyncSession
-    ) -> int:
-        """Calculate compatibility score between two users"""
+    ) -> Dict[str, Any]:
+        """Calculate compatibility score between two users with detailed factors"""
         cache_key = f"{min(user1_id, user2_id)}_{max(user1_id, user2_id)}"
         
         if cache_key in self.compatibility_cache:
@@ -197,64 +198,122 @@ class MatchingService:
         users = result.scalars().all()
         
         if len(users) != 2:
-            return 0
+            return {"score": 0, "factors": {}, "details": "One or both users not found"}
         
         user1, user2 = users
         
-        score = 0
+        # Initialize factors tracking
+        factors = {
+            "age_compatibility": {"score": 0, "weight": 0.30, "details": ""},
+            "community_compatibility": {"score": 0, "weight": 0.25, "details": ""},
+            "location_compatibility": {"score": 0, "weight": 0.20, "details": ""},
+            "interest_compatibility": {"score": 0, "weight": 0.15, "details": ""},
+            "profile_compatibility": {"score": 0, "weight": 0.10, "details": ""}
+        }
         
-        # Age compatibility (prefer similar age)
+        # Age compatibility (30% weight)
         if user1.age and user2.age:
             age_diff = abs(user1.age - user2.age)
             if age_diff <= 2:
-                score += 25
+                factors["age_compatibility"]["score"] = 100
+                factors["age_compatibility"]["details"] = f"Very similar age (difference: {age_diff} years)"
             elif age_diff <= 5:
-                score += 15
+                factors["age_compatibility"]["score"] = 75
+                factors["age_compatibility"]["details"] = f"Similar age (difference: {age_diff} years)"
             elif age_diff <= 10:
-                score += 5
+                factors["age_compatibility"]["score"] = 50
+                factors["age_compatibility"]["details"] = f"Moderate age difference (difference: {age_diff} years)"
+            elif age_diff <= 15:
+                factors["age_compatibility"]["score"] = 25
+                factors["age_compatibility"]["details"] = f"Significant age difference (difference: {age_diff} years)"
+            else:
+                factors["age_compatibility"]["score"] = 0
+                factors["age_compatibility"]["details"] = f"Large age difference (difference: {age_diff} years)"
+        else:
+            factors["age_compatibility"]["details"] = "Age information not available"
         
-        # Community compatibility
-        if user1.community and user2.community and user1.community == user2.community:
-            score += 20
+        # Community compatibility (25% weight)
+        if user1.community and user2.community:
+            if user1.community == user2.community:
+                factors["community_compatibility"]["score"] = 100
+                factors["community_compatibility"]["details"] = f"Same community: {user1.community}"
+            else:
+                factors["community_compatibility"]["score"] = 0
+                factors["community_compatibility"]["details"] = f"Different communities: {user1.community} vs {user2.community}"
+        else:
+            factors["community_compatibility"]["details"] = "Community information not available"
         
-        # Location compatibility
-        if user1.location and user2.location and user1.location == user2.location:
-            score += 15
+        # Location compatibility (20% weight)
+        if user1.location and user2.location:
+            if user1.location == user2.location:
+                factors["location_compatibility"]["score"] = 100
+                factors["location_compatibility"]["details"] = f"Same location: {user1.location}"
+            else:
+                factors["location_compatibility"]["score"] = 0
+                factors["location_compatibility"]["details"] = f"Different locations: {user1.location} vs {user2.location}"
+        else:
+            factors["location_compatibility"]["details"] = "Location information not available"
         
-        # Profession compatibility (if both have professions)
-        if user1.profession and user2.profession:
-            # Simple keyword matching for profession compatibility
-            prof1_lower = user1.profession.lower()
-            prof2_lower = user2.profession.lower()
-            
-            if prof1_lower == prof2_lower:
-                score += 10
-            elif any(word in prof2_lower for word in prof1_lower.split()):
-                score += 5
-        
-        # Profile text compatibility (simple keyword matching)
+        # Interest compatibility (15% weight) - based on profile text keywords
         if user1.profile_text and user2.profile_text:
             text1_lower = user1.profile_text.lower()
             text2_lower = user2.profile_text.lower()
             
-            # Count common words
+            # Extract common interests/keywords
             words1 = set(text1_lower.split())
             words2 = set(text2_lower.split())
             common_words = words1.intersection(words2)
             
             if len(common_words) > 0:
-                score += min(len(common_words) * 2, 20)
+                interest_score = min(len(common_words) * 20, 100)
+                factors["interest_compatibility"]["score"] = interest_score
+                factors["interest_compatibility"]["details"] = f"Shared interests: {', '.join(list(common_words)[:5])}"
+            else:
+                factors["interest_compatibility"]["details"] = "No shared interests detected"
+        else:
+            factors["interest_compatibility"]["details"] = "Profile text not available"
         
-        # Random factor for variety
-        score += random.randint(-5, 5)
+        # Profile text compatibility (10% weight)
+        if user1.profession and user2.profession:
+            prof1_lower = user1.profession.lower()
+            prof2_lower = user2.profession.lower()
+            
+            if prof1_lower == prof2_lower:
+                factors["profile_compatibility"]["score"] = 100
+                factors["profile_compatibility"]["details"] = f"Same profession: {user1.profession}"
+            elif any(word in prof2_lower for word in prof1_lower.split()):
+                factors["profile_compatibility"]["score"] = 50
+                factors["profile_compatibility"]["details"] = f"Related professions: {user1.profession} and {user2.profession}"
+            else:
+                factors["profile_compatibility"]["score"] = 0
+                factors["profile_compatibility"]["details"] = f"Different professions: {user1.profession} and {user2.profession}"
+        else:
+            factors["profile_compatibility"]["details"] = "Profession information not available"
+        
+        # Calculate weighted total score
+        total_score = 0
+        for factor_name, factor_data in factors.items():
+            total_score += factor_data["score"] * factor_data["weight"]
+        
+        # Add small random factor for variety (-2 to +2 points)
+        random_factor = random.randint(-2, 2)
+        total_score += random_factor
         
         # Ensure score is between 0 and 100
-        score = max(0, min(100, score))
+        total_score = max(0, min(100, int(total_score)))
+        
+        # Create result
+        result = {
+            "score": total_score,
+            "factors": factors,
+            "details": f"Compatibility score: {total_score}/100",
+            "random_factor": random_factor
+        }
         
         # Cache the result
-        self.compatibility_cache[cache_key] = score
+        self.compatibility_cache[cache_key] = result
         
-        return score
+        return result
     
     async def accept_match(
         self,

@@ -107,16 +107,16 @@
   - [x] 2.2 Implement profile picture upload with validation (320x320px, JPEG/PNG, <30MB)
   - [x] 2.3 Add client-side image cropping and circular display functionality
   - [x] 2.4 Create default avatar (gray silhouette) for users without profile pictures
-  - [ ] 2.5 Implement profile editing form with validation (500 char limit for text)
-  - [ ] 2.6 Add profile picture change functionality with proper cleanup
-  - [ ] 2.7 Create profile display component with responsive design
-  - [ ] 2.8 Implement profile data parsing for interests and keywords extraction
+  - [x] 2.5 Implement profile editing form with validation (500 char limit for text)
+  - [x] 2.6 Add profile picture change functionality with proper cleanup
+  - [x] 2.7 Create profile display component with responsive design
+  - [x] 2.8 Implement profile data parsing for interests and keywords extraction
 
 - [ ] 3.0 Friend Matching System
-  - [ ] 3.1 Implement user slot system (2 slots per user, reset after 2 days or 50 coins)
-  - [ ] 3.2 Create compatibility algorithm with community, location, interests, and age ranking
-  - [ ] 3.3 Add predefined community and location selection options
-  - [ ] 3.4 Implement matching queue and algorithm service
+  - [x] 3.1 Implement user slot system (2 slots per user, reset after 2 days or 50 coins)
+  - [x] 3.2 Create compatibility algorithm with community, location, interests, and age ranking
+  - [x] 3.3 Add predefined community and location selection options
+  - [x] 3.4 Implement matching queue and algorithm service
   - [ ] 3.5 Create match request and acceptance flow
   - [ ] 3.6 Add slot purchase functionality with coin system
   - [ ] 3.7 Implement match status tracking and expiration logic

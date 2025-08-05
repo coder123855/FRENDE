@@ -81,9 +81,16 @@ def validate_database_connection() -> bool:
             async with engine.begin() as conn:
                 await conn.execute(text("SELECT 1"))
         
-        # Run the async test
-        asyncio.run(test_connection())
-        return True
+        # Check if we're already in an event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're in a loop, skip validation to avoid conflicts
+            logger.warning("Database validation skipped - already in event loop")
+            return True
+        except RuntimeError:
+            # No event loop running, safe to use asyncio.run()
+            asyncio.run(test_connection())
+            return True
     except Exception as e:
         logger.error(f"Database connection validation failed: {e}")
         return False

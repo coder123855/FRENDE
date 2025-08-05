@@ -12,6 +12,9 @@ class UserCreate(BaseModel):
     profile_text: Optional[str] = Field(None, max_length=500)
     community: Optional[str] = None
     location: Optional[str] = None
+    interests: Optional[str] = None  # JSON string of interest tags
+    age_preference_min: Optional[int] = Field(None, ge=18, le=100)
+    age_preference_max: Optional[int] = Field(None, ge=18, le=100)
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
@@ -22,6 +25,9 @@ class UserUpdate(BaseModel):
     profile_picture_url: Optional[str] = None
     community: Optional[str] = None
     location: Optional[str] = None
+    interests: Optional[str] = None  # JSON string of interest tags
+    age_preference_min: Optional[int] = Field(None, ge=18, le=100)
+    age_preference_max: Optional[int] = Field(None, ge=18, le=100)
 
 class UserRead(BaseModel):
     id: int
@@ -34,9 +40,14 @@ class UserRead(BaseModel):
     profile_text: Optional[str] = None
     community: Optional[str] = None
     location: Optional[str] = None
+    interests: Optional[str] = None
+    age_preference_min: Optional[int] = None
+    age_preference_max: Optional[int] = None
     available_slots: int
     total_slots_used: int
     coins: int
+    slot_reset_time: Optional[datetime] = None
+    last_slot_purchase: Optional[datetime] = None
     is_active: bool
     is_verified: bool
     created_at: datetime

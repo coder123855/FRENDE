@@ -1,4 +1,5 @@
-from typing import List, Optional, Dict, Any
+import re
+from typing import List, Optional, Dict, Any, Set
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from datetime import datetime, timedelta
@@ -22,6 +23,35 @@ class UserService:
     def __init__(self):
         self.slot_reset_interval = timedelta(days=2)
         self.slot_purchase_cost = settings.SLOT_PURCHASE_COST
+        
+        # Predefined interest categories and keywords
+        self.interest_categories = {
+            'technology': ['coding', 'programming', 'software', 'tech', 'computer', 'ai', 'machine learning', 'data science', 'web development', 'mobile app', 'startup', 'innovation'],
+            'sports': ['fitness', 'gym', 'running', 'basketball', 'football', 'soccer', 'tennis', 'swimming', 'yoga', 'workout', 'exercise', 'athlete', 'sports'],
+            'music': ['music', 'guitar', 'piano', 'singing', 'concert', 'band', 'jazz', 'rock', 'pop', 'classical', 'electronic', 'dj', 'producer'],
+            'art': ['art', 'painting', 'drawing', 'photography', 'design', 'creative', 'artist', 'gallery', 'museum', 'sketch', 'digital art', 'illustration'],
+            'travel': ['travel', 'trip', 'vacation', 'explore', 'adventure', 'backpacking', 'tourism', 'culture', 'language', 'international', 'world'],
+            'food': ['cooking', 'baking', 'restaurant', 'food', 'cuisine', 'chef', 'recipe', 'dining', 'wine', 'coffee', 'tea', 'culinary'],
+            'books': ['reading', 'books', 'literature', 'novel', 'author', 'library', 'bookstore', 'fiction', 'non-fiction', 'poetry', 'writing'],
+            'gaming': ['gaming', 'video games', 'gamer', 'esports', 'console', 'pc gaming', 'mobile games', 'rpg', 'fps', 'strategy'],
+            'nature': ['outdoors', 'hiking', 'camping', 'nature', 'environment', 'sustainability', 'green', 'eco-friendly', 'gardening', 'plants'],
+            'business': ['entrepreneur', 'business', 'startup', 'marketing', 'finance', 'investment', 'consulting', 'management', 'strategy', 'innovation'],
+            'education': ['learning', 'study', 'university', 'college', 'course', 'online learning', 'skill', 'knowledge', 'research', 'academic'],
+            'social': ['friends', 'social', 'community', 'networking', 'meetup', 'events', 'party', 'socializing', 'people', 'relationships'],
+            'health': ['health', 'wellness', 'meditation', 'mental health', 'nutrition', 'fitness', 'yoga', 'mindfulness', 'self-care', 'therapy'],
+            'fashion': ['fashion', 'style', 'clothing', 'designer', 'trend', 'beauty', 'makeup', 'accessories', 'shopping', 'outfit'],
+            'movies': ['movies', 'film', 'cinema', 'tv shows', 'netflix', 'streaming', 'actor', 'director', 'theater', 'entertainment'],
+            'pets': ['pets', 'dogs', 'cats', 'animals', 'pet care', 'veterinary', 'animal welfare', 'pet training', 'adoption'],
+            'volunteer': ['volunteer', 'charity', 'nonprofit', 'community service', 'helping', 'donation', 'social impact', 'philanthropy'],
+            'diy': ['diy', 'crafts', 'handmade', 'projects', 'building', 'repair', 'woodworking', 'sewing', 'knitting', 'creative projects']
+        }
+        
+        # Common keywords that indicate interests
+        self.common_keywords = [
+            'love', 'enjoy', 'passionate', 'interested', 'fascinated', 'excited', 'curious',
+            'hobby', 'interest', 'activity', 'skill', 'talent', 'expertise', 'experience',
+            'learn', 'study', 'practice', 'improve', 'develop', 'grow', 'explore', 'discover'
+        ]
     
     async def get_user_profile(
         self,
@@ -299,6 +329,7 @@ class UserService:
         # Purchase slot
         user.coins -= self.slot_purchase_cost
         user.available_slots += 1
+        user.last_slot_purchase = datetime.utcnow()
         user.updated_at = datetime.utcnow()
         
         await session.commit()
@@ -321,7 +352,10 @@ class UserService:
             select(User).where(
                 and_(
                     User.available_slots < 2,
-                    User.updated_at < cutoff_date
+                    or_(
+                        User.slot_reset_time == None,
+                        User.slot_reset_time < cutoff_date
+                    )
                 )
             )
         )
@@ -330,6 +364,7 @@ class UserService:
         
         for user in users_to_reset:
             user.available_slots = 2
+            user.slot_reset_time = datetime.utcnow()
             user.updated_at = datetime.utcnow()
         
         if users_to_reset:
@@ -363,6 +398,9 @@ class UserService:
         # Use slot
         user.available_slots -= 1
         user.total_slots_used += 1
+        # Set slot reset time if not already set
+        if not user.slot_reset_time:
+            user.slot_reset_time = datetime.utcnow()
         user.updated_at = datetime.utcnow()
         
         await session.commit()
@@ -527,14 +565,180 @@ class UserService:
         user2: User
     ) -> List[str]:
         """Get common interests between two users"""
-        if not user1.profile_text or not user2.profile_text:
-            return []
+        interests1 = await self.parse_profile_interests(user1)
+        interests2 = await self.parse_profile_interests(user2)
         
-        # Simple keyword extraction (in a real app, you'd use NLP)
-        words1 = set(user1.profile_text.lower().split())
-        words2 = set(user2.profile_text.lower().split())
+        return list(set(interests1) & set(interests2))
+    
+    async def parse_profile_interests(self, user: User) -> List[str]:
+        """
+        Parse user profile data to extract interests and keywords
         
-        return list(words1.intersection(words2))
+        Args:
+            user: User object with profile data
+            
+        Returns:
+            List of extracted interests/keywords
+        """
+        interests = set()
+        
+        # Combine all text fields for analysis
+        text_fields = []
+        if user.name:
+            text_fields.append(user.name.lower())
+        if user.profession:
+            text_fields.append(user.profession.lower())
+        if user.profile_text:
+            text_fields.append(user.profile_text.lower())
+        if user.community:
+            text_fields.append(user.community.lower())
+        if user.location:
+            text_fields.append(user.location.lower())
+        
+        combined_text = ' '.join(text_fields)
+        
+        # Extract interests from predefined categories
+        for category, keywords in self.interest_categories.items():
+            for keyword in keywords:
+                if keyword in combined_text:
+                    interests.add(category)
+                    interests.add(keyword)
+        
+        # Extract common interest keywords
+        for keyword in self.common_keywords:
+            if keyword in combined_text:
+                interests.add(keyword)
+        
+        # Extract additional keywords using regex patterns
+        additional_keywords = self._extract_additional_keywords(combined_text)
+        interests.update(additional_keywords)
+        
+        return list(interests)
+    
+    def _extract_additional_keywords(self, text: str) -> Set[str]:
+        """
+        Extract additional keywords using regex patterns and NLP-like techniques
+        
+        Args:
+            text: Combined profile text
+            
+        Returns:
+            Set of additional keywords
+        """
+        keywords = set()
+        
+        # Extract words that appear after interest indicators
+        interest_patterns = [
+            r'i\s+(?:love|enjoy|like|am\s+passionate\s+about)\s+(\w+)',
+            r'i\s+(?:am\s+interested\s+in|fascinated\s+by)\s+(\w+)',
+            r'my\s+(?:hobby|interest|passion)\s+is\s+(\w+)',
+            r'i\s+(?:work\s+in|study)\s+(\w+)',
+            r'i\s+(?:play|practice)\s+(\w+)',
+            r'i\s+(?:read|watch|listen\s+to)\s+(\w+)'
+        ]
+        
+        for pattern in interest_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            keywords.update(matches)
+        
+        # Extract compound words and phrases
+        compound_patterns = [
+            r'\b\w+\s+(?:development|design|engineering|science|art|music|sports|gaming)\b',
+            r'\b(?:web|mobile|software|data|machine\s+learning|artificial\s+intelligence)\s+\w+\b',
+            r'\b(?:video\s+games|board\s+games|card\s+games)\b',
+            r'\b(?:rock\s+climbing|mountain\s+biking|road\s+biking)\b',
+            r'\b(?:classical\s+music|jazz\s+music|electronic\s+music)\b',
+            r'\b(?:digital\s+art|fine\s+art|street\s+art)\b',
+            r'\b(?:fine\s+dining|street\s+food|home\s+cooking)\b'
+        ]
+        
+        for pattern in compound_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            keywords.update(matches)
+        
+        # Extract location-based interests
+        location_keywords = [
+            'beach', 'mountains', 'city', 'countryside', 'urban', 'rural',
+            'coastal', 'inland', 'tropical', 'desert', 'forest', 'lake'
+        ]
+        
+        for keyword in location_keywords:
+            if keyword in text:
+                keywords.add(keyword)
+        
+        return keywords
+    
+    async def get_profile_keywords(self, user: User) -> Dict[str, Any]:
+        """
+        Get comprehensive profile analysis including interests, keywords, and categories
+        
+        Args:
+            user: User object
+            
+        Returns:
+            Dictionary with profile analysis
+        """
+        interests = await self.parse_profile_interests(user)
+        
+        # Categorize interests
+        categories = {}
+        for interest in interests:
+            for category, keywords in self.interest_categories.items():
+                if interest in keywords or interest == category:
+                    if category not in categories:
+                        categories[category] = []
+                    categories[category].append(interest)
+        
+        # Calculate profile richness score
+        richness_score = min(len(interests) / 10.0, 1.0)  # Normalize to 0-1
+        
+        return {
+            'interests': interests,
+            'categories': categories,
+            'richness_score': richness_score,
+            'total_interests': len(interests),
+            'category_count': len(categories)
+        }
+    
+    async def update_profile_with_parsed_data(
+        self,
+        user_id: int,
+        session: AsyncSession = None
+    ) -> Dict[str, Any]:
+        """
+        Update user profile with parsed interests and keywords
+        This method can be called after profile updates to refresh the analysis
+        
+        Args:
+            user_id: User ID
+            session: Database session
+            
+        Returns:
+            Dictionary with updated profile analysis
+        """
+        if not session:
+            async with get_async_session() as session:
+                return await self._update_profile_with_parsed_data_internal(user_id, session)
+        
+        return await self._update_profile_with_parsed_data_internal(user_id, session)
+    
+    async def _update_profile_with_parsed_data_internal(
+        self,
+        user_id: int,
+        session: AsyncSession
+    ) -> Dict[str, Any]:
+        """Internal method to update profile with parsed data"""
+        user = await self.get_user_profile(user_id, session)
+        if not user:
+            raise UserNotFoundError(f"User with ID {user_id} not found")
+        
+        # Get profile analysis
+        analysis = await self.get_profile_keywords(user)
+        
+        # Log the analysis for debugging
+        logger.info(f"Profile analysis for user {user_id}: {analysis}")
+        
+        return analysis
 
-# Global user service instance
+# Create service instance
 user_service = UserService() 

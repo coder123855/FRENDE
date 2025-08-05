@@ -15,6 +15,7 @@ from api.users import router as users_router
 from api.matches import router as matches_router
 from api.tasks import router as tasks_router
 from api.chat import router as chat_router
+from api.queue import router as queue_router
 import logging
 from datetime import datetime
 import os
@@ -69,6 +70,33 @@ app.include_router(users_router)
 app.include_router(matches_router)
 app.include_router(tasks_router)
 app.include_router(chat_router)
+app.include_router(queue_router)
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup event handler"""
+    logger.info("Starting Frende backend application...")
+    
+    # Start background tasks
+    try:
+        from services.background_tasks import background_processor
+        background_processor.start_background_tasks()
+        logger.info("Background tasks started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start background tasks: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Shutdown event handler"""
+    logger.info("Shutting down Frende backend application...")
+    
+    # Stop background tasks
+    try:
+        from services.background_tasks import background_processor
+        await background_processor.stop_queue_processor()
+        logger.info("Background tasks stopped successfully")
+    except Exception as e:
+        logger.error(f"Failed to stop background tasks: {e}")
 
 @app.get("/")
 def read_root():
