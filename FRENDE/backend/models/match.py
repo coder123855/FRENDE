@@ -34,9 +34,16 @@ class Match(Base):
     # Chat room
     chat_room_id = Column(String(100), unique=True, nullable=True)
     
+    # Conversation starter fields
+    conversation_starter_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    conversation_started_at = Column(DateTime(timezone=True), nullable=True)
+    greeting_sent = Column(Boolean, default=False)
+    starter_timeout_at = Column(DateTime(timezone=True), nullable=True)
+    
     # Relationships
     user1 = relationship("User", foreign_keys=[user1_id])
     user2 = relationship("User", foreign_keys=[user2_id])
+    conversation_starter = relationship("User", foreign_keys=[conversation_starter_id])
     tasks = relationship("Task", back_populates="match")
     messages = relationship("ChatMessage", back_populates="match")
     chat_room = relationship("ChatRoom", back_populates="match", uselist=False)
@@ -56,4 +63,18 @@ class Match(Base):
     
     def should_expire(self):
         """Check if match should be marked as expired"""
-        return self.is_expired() or self.is_completed() 
+        return self.is_expired() or self.is_completed()
+    
+    def has_conversation_starter(self):
+        """Check if match has a conversation starter assigned"""
+        return self.conversation_starter_id is not None
+    
+    def is_conversation_starter_expired(self):
+        """Check if conversation starter has timed out"""
+        if not self.starter_timeout_at:
+            return False
+        return datetime.utcnow() > self.starter_timeout_at
+    
+    def get_conversation_starter_user_id(self):
+        """Get the user ID of the conversation starter"""
+        return self.conversation_starter_id 

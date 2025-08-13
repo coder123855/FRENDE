@@ -8,15 +8,19 @@ import ImageUpload from './ImageUpload';
 import Avatar from './ui/avatar';
 import { useCompatibilityOptions } from '../hooks/useCompatibilityOptions';
 import { userAPI } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
-const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
+const ProfileForm = ({ onSave, className = "" }) => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    name: '',
-    age: '',
-    profession: '',
-    profile_text: '',
-    community: '',
-    location: '',
+    name: user?.name || '',
+    age: user?.age || '',
+    profession: user?.profession || '',
+    profile_text: user?.profile_text || '',
+    community: user?.community || '',
+    location: user?.location || '',
     interests: [],
     age_preference_min: '',
     age_preference_max: ''
@@ -99,67 +103,110 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
       setError(validationError);
       return;
     }
-
+    
     setSaving(true);
+    
     try {
-      const response = await userAPI.updateProfile({
+      const updatedData = {
         ...formData,
-        age: formData.age ? parseInt(formData.age) : null,
-        age_preference_min: formData.age_preference_min ? parseInt(formData.age_preference_min) : null,
-        age_preference_max: formData.age_preference_max ? parseInt(formData.age_preference_max) : null,
         interests: stringifyInterests(formData.interests),
         profile_picture_url: profilePictureUrl
-      });
-
-      onSave(response.data);
+      };
+      
+      const result = await userAPI.updateProfile(updatedData);
+      
+      if (result.success) {
+        onSave && onSave(result.data);
+        navigate('/profile');
+      } else {
+        setError(result.error || 'Failed to save profile');
+      }
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Failed to update profile');
+      setError('An error occurred while saving your profile');
+      console.error('Profile save error:', err);
     } finally {
       setSaving(false);
     }
   };
 
-  return (
-    <Card className={`p-6 ${className}`}>
-      <form onSubmit={handleSubmit} className="space-y-6">
+  const handleCancel = () => {
+    console.log('Profile edit cancelled');
+    navigate('/profile');
+  };
+
+  if (optionsLoading) {
+    return (
+      <Card className={`p-4 sm:p-6 ${className}`}>
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Edit Profile</h2>
-          <p className="text-gray-600">Update your profile information and picture</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-gray-600">Loading form options...</p>
         </div>
+      </Card>
+    );
+  }
+
+  if (optionsError) {
+    return (
+      <Card className={`p-4 sm:p-6 ${className}`}>
+        <div className="text-center text-red-600">
+          <p>Error loading form options. Please try again.</p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className={`p-4 sm:p-6 ${className}`}>
+      <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+        <div className="text-center sm:text-left">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Edit Profile</h1>
+          <p className="text-sm text-gray-600">Update your profile information</p>
+        </div>
+
+        {error && (
+          <div className="p-3 bg-red-100 border border-red-400 text-red-700 rounded-md text-sm">
+            {error}
+          </div>
+        )}
 
         {/* Profile Picture Section */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-center">
-            <Avatar 
-              src={profilePictureUrl} 
-              name={formData.name || user?.name}
-              size="3xl" 
-              alt="Current profile picture"
-              variant="gradient"
-            />
+        <div className="space-y-3">
+          <label className="block text-sm font-medium text-gray-700">Profile Picture</label>
+          <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4">
+            <div className="flex-shrink-0">
+              <Avatar 
+                src={profilePictureUrl} 
+                name={formData.name}
+                size="xl" 
+                alt="Profile picture"
+                variant="gradient"
+              />
+            </div>
+            <div className="flex-1 w-full sm:w-auto">
+              <ImageUpload
+                onImageUpload={handleImageUpload}
+                onImageRemove={handleImageRemove}
+                currentImageUrl={profilePictureUrl}
+                className="w-full"
+              />
+            </div>
           </div>
-          
-          <ImageUpload
-            onImageUpload={handleImageUpload}
-            onImageRemove={handleImageRemove}
-            currentImageUrl={profilePictureUrl}
-            disabled={saving}
-          />
         </div>
 
-        {/* Form Fields */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Basic Information */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-              Name
+              Full Name *
             </label>
             <Input
               id="name"
               type="text"
               value={formData.name}
               onChange={(e) => handleInputChange('name', e.target.value)}
-              placeholder="Enter your name"
-              disabled={saving}
+              required
+              className="w-full"
+              placeholder="Enter your full name"
             />
           </div>
 
@@ -174,39 +221,39 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
               max="100"
               value={formData.age}
               onChange={(e) => handleInputChange('age', e.target.value)}
+              className="w-full"
               placeholder="Enter your age"
-              disabled={saving}
             />
           </div>
+        </div>
 
-          <div>
-            <label htmlFor="profession" className="block text-sm font-medium text-gray-700 mb-1">
-              Profession
-            </label>
-            <Input
-              id="profession"
-              type="text"
-              value={formData.profession}
-              onChange={(e) => handleInputChange('profession', e.target.value)}
-              placeholder="Enter your profession"
-              disabled={saving}
-            />
-          </div>
+        <div>
+          <label htmlFor="profession" className="block text-sm font-medium text-gray-700 mb-1">
+            Profession
+          </label>
+          <Input
+            id="profession"
+            type="text"
+            value={formData.profession}
+            onChange={(e) => handleInputChange('profession', e.target.value)}
+            className="w-full"
+            placeholder="What do you do?"
+          />
+        </div>
 
+        {/* Location and Community */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="community" className="block text-sm font-medium text-gray-700 mb-1">
               Community
             </label>
             <Select
-              options={getCommunityOptions()}
+              id="community"
               value={formData.community}
               onChange={(value) => handleInputChange('community', value)}
+              options={getCommunityOptions()}
               placeholder="Select your community"
-              disabled={saving || optionsLoading}
-              loading={optionsLoading}
-              allowCustom={true}
-              customPlaceholder="Enter custom community"
-              error={optionsError}
+              className="w-full"
             />
           </div>
 
@@ -215,62 +262,33 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
               Location
             </label>
             <Select
-              options={getLocationOptions()}
+              id="location"
               value={formData.location}
               onChange={(value) => handleInputChange('location', value)}
+              options={getLocationOptions()}
               placeholder="Select your location"
-              disabled={saving || optionsLoading}
-              loading={optionsLoading}
-              allowCustom={true}
-              customPlaceholder="Enter custom location"
-              error={optionsError}
+              className="w-full"
             />
           </div>
         </div>
 
-        <div>
-          <label htmlFor="profile_text" className="block text-sm font-medium text-gray-700 mb-1">
-            About Me
-          </label>
-          <textarea
-            id="profile_text"
-            rows={4}
-            value={formData.profile_text}
-            onChange={(e) => handleInputChange('profile_text', e.target.value)}
-            placeholder="Tell us about yourself (max 500 characters)"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
-            maxLength={500}
-            disabled={saving}
-          />
-          <div className="text-xs text-gray-500 mt-1 text-right">
-            {formData.profile_text.length}/500 characters
-          </div>
-        </div>
-
-        {/* Interests Section */}
+        {/* Interests */}
         <div>
           <label htmlFor="interests" className="block text-sm font-medium text-gray-700 mb-1">
             Interests
           </label>
           <MultiSelect
-            options={getInterestOptions()}
+            id="interests"
             value={formData.interests}
             onChange={(value) => handleInputChange('interests', value)}
+            options={getInterestOptions()}
             placeholder="Select your interests"
-            disabled={saving || optionsLoading}
-            loading={optionsLoading}
-            allowCustom={true}
-            customPlaceholder="Enter custom interest"
-            maxSelections={10}
-            error={optionsError}
+            className="w-full"
           />
-          <div className="text-xs text-gray-500 mt-1">
-            Select up to 10 interests that describe you
-          </div>
         </div>
 
-        {/* Age Preferences Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Age Preferences */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="age_preference_min" className="block text-sm font-medium text-gray-700 mb-1">
               Minimum Age Preference
@@ -278,16 +296,13 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
             <Input
               id="age_preference_min"
               type="number"
-              min="18"
+              min="13"
               max="100"
               value={formData.age_preference_min}
               onChange={(e) => handleInputChange('age_preference_min', e.target.value)}
-              placeholder="18"
-              disabled={saving}
+              className="w-full"
+              placeholder="Min age"
             />
-            <div className="text-xs text-gray-500 mt-1">
-              Minimum age for potential matches
-            </div>
           </div>
 
           <div>
@@ -297,44 +312,52 @@ const ProfileForm = ({ user, onSave, onCancel, className = "" }) => {
             <Input
               id="age_preference_max"
               type="number"
-              min="18"
+              min="13"
               max="100"
               value={formData.age_preference_max}
               onChange={(e) => handleInputChange('age_preference_max', e.target.value)}
-              placeholder="100"
-              disabled={saving}
+              className="w-full"
+              placeholder="Max age"
             />
-            <div className="text-xs text-gray-500 mt-1">
-              Maximum age for potential matches
-            </div>
           </div>
         </div>
 
-        {/* Error Message */}
-        {error && (
-          <div className="text-red-600 text-sm bg-red-50 p-3 rounded-md">
-            {error}
+        {/* Profile Text */}
+        <div>
+          <label htmlFor="profile_text" className="block text-sm font-medium text-gray-700 mb-1">
+            About Me
+          </label>
+          <textarea
+            id="profile_text"
+            value={formData.profile_text}
+            onChange={(e) => handleInputChange('profile_text', e.target.value)}
+            rows={4}
+            maxLength={500}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            placeholder="Tell us about yourself (max 500 characters)"
+          />
+          <div className="text-xs text-gray-500 mt-1 text-right">
+            {formData.profile_text.length}/500 characters
           </div>
-        )}
+        </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-3 pt-4">
-          <Button
-            type="submit"
-            disabled={saving}
-            className="flex-1"
-          >
-            {saving ? 'Saving...' : 'Save Changes'}
-          </Button>
-          
+        {/* Form Actions */}
+        <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t">
           <Button
             type="button"
             variant="outline"
-            onClick={onCancel}
+            onClick={handleCancel}
             disabled={saving}
-            className="flex-1"
+            className="flex-1 sm:flex-none"
           >
             Cancel
+          </Button>
+          <Button
+            type="submit"
+            disabled={saving}
+            className="flex-1 sm:flex-none"
+          >
+            {saving ? 'Saving...' : 'Save Profile'}
           </Button>
         </div>
       </form>

@@ -15,6 +15,8 @@ import UserCard from './UserCard';
 import CompatibilityModal from './CompatibilityModal';
 import useCompatibleUsers from '../hooks/useCompatibleUsers';
 import { matchAPI } from '../lib/api';
+import MatchingLoadingSkeleton from './loading/MatchingLoadingSkeleton';
+import ErrorFallback from './error-states/ErrorFallback';
 
 
 
@@ -198,23 +200,17 @@ export default function MatchingInterface() {
         <TabsContent value="discover" className="mt-6">
           {/* Error State */}
           {compatibleUsersError && (
-            <div className="text-center py-8">
-              <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Error Loading Users</h3>
-              <p className="text-gray-600 mb-4">{compatibleUsersError}</p>
-              <Button onClick={refreshCompatibleUsers} variant="outline">
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Try Again
-              </Button>
-            </div>
+            <ErrorFallback
+              error={{ message: compatibleUsersError }}
+              errorType="general"
+              onRetry={refreshCompatibleUsers}
+            />
           )}
 
           {/* Loading State */}
           {compatibleUsersLoading && compatibleUsers.length === 0 && (
-            <div className="text-center py-12">
-              <Loader2 className="w-12 h-12 text-gray-400 mx-auto mb-4 animate-spin" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Finding compatible users...</h3>
-              <p className="text-gray-600">We're searching for people who might be a great match for you!</p>
+            <div className="py-12">
+              <MatchingLoadingSkeleton count={3} />
             </div>
           )}
 

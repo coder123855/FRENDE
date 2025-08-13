@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -20,6 +20,7 @@ class ChatMessage(Base):
     # Message metadata
     is_read = Column(Boolean, default=False)
     is_system_message = Column(Boolean, default=False)  # For auto-generated messages
+    metadata = Column(JSON, nullable=True)
     
     # Task-related messages
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)

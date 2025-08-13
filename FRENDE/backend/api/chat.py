@@ -1,374 +1,258 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Dict, Any
+import logging
 
-from core.auth import current_active_user
 from core.database import get_async_session
+from core.auth import get_current_user
 from models.user import User
-from models.chat import ChatMessage, ChatRoom
-from models.match import Match
-from schemas.chat import (
-    ChatMessageCreate, ChatMessageRead, ChatMessageListResponse,
-    ChatMessageSendResponse, ReadReceiptRequest, ReadReceiptResponse,
-    UnreadCountResponse, ChatRoomStatus
-)
-from schemas.common import PaginationParams, SuccessResponse, ErrorResponse
 from services.chat import chat_service
-from services.matching import matching_service
+from schemas.chat import (
+    ChatMessageRequest,
+    ChatMessageResponse,
+    ChatHistoryResponse,
+    ChatHistoryPage,
+    MessageReadRequest,
+    TypingStatusResponse,
+    ChatRoomStatus
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-@router.get("/matches/{match_id}/messages", response_model=ChatMessageListResponse)
-async def get_chat_messages(
+@router.get("/{match_id}/history", response_model=ChatHistoryPage)
+async def get_chat_history(
     match_id: int,
-    page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(50, ge=1, le=100, description="Page size"),
-    current_user: User = Depends(current_active_user),
+    limit: int = 50,
+    page: int = 1,
+    include_system: bool = False,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Get chat message history for a match"""
+    """Get chat history for a match"""
     try:
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            match_id, current_user.id, session
+        page_data = await chat_service.get_chat_history_paginated(
+            match_id, current_user.id, page, limit, include_system, session
         )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Get chat messages
-        messages = await chat_service.get_chat_messages(
-            match_id, current_user.id, page, size, session
+        return ChatHistoryPage(
+            match_id=match_id,
+            messages=page_data["messages"],
+            page=page_data["page"],
+            size=page_data["size"],
+            total=page_data["total"],
+            has_more=page_data["has_more"],
+            next_cursor=page_data["next_cursor"],
+            prev_cursor=page_data["prev_cursor"],
         )
-        
-        return messages
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving chat messages: {str(e)}"
-        )
-
-@router.post("/matches/{match_id}/messages", response_model=ChatMessageSendResponse)
-async def send_message(
+@router.get("/{match_id}/history/cursor", response_model=ChatHistoryPage)
+async def get_chat_history_cursor(
     match_id: int,
-    message_data: ChatMessageCreate,
-    current_user: User = Depends(current_active_user),
+    cursor: str | None = None,
+    direction: str = "older",
+    limit: int = 50,
+    include_system: bool = False,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Send a message in a chat room"""
+    """Get chat history using cursor pagination"""
     try:
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            match_id, current_user.id, session
+        cursor_dt = None
+        if cursor:
+            cursor_dt = datetime.fromisoformat(cursor)
+        page_data = await chat_service.get_chat_history_cursor(
+            match_id, current_user.id, cursor_dt, limit, direction, include_system, session
         )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Send message
-        message = await chat_service.send_message(
-            match_id,
-            current_user.id,
-            message_data.message_text,
-            message_data.message_type,
-            message_data.task_id,
-            session
+        return ChatHistoryPage(
+            match_id=match_id,
+            messages=page_data["messages"],
+            size=page_data["size"],
+            has_more=page_data["has_more"],
+            next_cursor=page_data["next_cursor"],
+            prev_cursor=page_data["prev_cursor"],
         )
-        
-        return ChatMessageSendResponse(
-            message=message,
-            status_message="Message sent successfully"
-        )
-        
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )
     except Exception as e:
+        logger.error(f"Error getting chat history (cursor): {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error sending message: {str(e)}"
+            detail="Failed to retrieve chat history"
         )
 
-@router.put("/messages/{message_id}/read", response_model=ReadReceiptResponse)
-async def mark_message_read(
-    message_id: int,
-    current_user: User = Depends(current_active_user),
+@router.get("/{match_id}/status", response_model=ChatRoomStatus)
+async def get_chat_status(
+    match_id: int,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Mark a message as read"""
+    """Get chat room online and typing status"""
     try:
-        # Get message
-        result = await session.execute(
-            select(ChatMessage).where(ChatMessage.id == message_id)
+        status_data = await chat_service.get_chat_room_status(match_id, session)
+        return ChatRoomStatus(
+            match_id=match_id,
+            online_users=status_data.get("online_users", []),
+            total_users=len(status_data.get("online_users", [])),
+            last_activity=status_data.get("last_activity").isoformat() if status_data.get("last_activity") else None,
         )
-        message = result.scalar_one_or_none()
-        
-        if not message:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Message not found"
-            )
-        
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            message.match_id, current_user.id, session
-        )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Mark as read
-        message.is_read = True
-        message.read_at = datetime.utcnow()
-        await session.commit()
-        
-        return ReadReceiptResponse(
-            message_id=message_id,
-            read_at=message.read_at,
-            message="Message marked as read"
-        )
-        
-    except HTTPException:
-        raise
     except Exception as e:
+        logger.error(f"Error getting chat status: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error marking message as read: {str(e)}"
+            detail="Failed to get chat status"
         )
 
-@router.get("/matches/{match_id}/unread", response_model=UnreadCountResponse)
+@router.get("/{match_id}/unread-count")
 async def get_unread_count(
     match_id: int,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get unread message count for a match"""
     try:
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            match_id, current_user.id, session
-        )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Get unread count
-        unread_count = await chat_service.get_unread_count(
-            match_id, current_user.id, session
-        )
-        
-        return UnreadCountResponse(
-            match_id=match_id,
-            unread_count=unread_count,
-            last_message_at=await chat_service.get_last_message_time(match_id, session)
-        )
-        
-    except HTTPException:
-        raise
+        count = await chat_service.get_unread_count(match_id, current_user.id, session)
+        return {"match_id": match_id, "unread_count": count}
     except Exception as e:
+        logger.error(f"Error getting unread count: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting unread count: {str(e)}"
+            detail="Failed to get unread count"
         )
-
-@router.delete("/messages/{message_id}")
-async def delete_message(
-    message_id: int,
-    current_user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session)
-):
-    """Delete a message (own messages only)"""
-    try:
-        # Get message
-        result = await session.execute(
-            select(ChatMessage).where(ChatMessage.id == message_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
         )
-        message = result.scalar_one_or_none()
-        
-        if not message:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Message not found"
-            )
-        
-        # Verify user is the sender
-        if message.sender_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Can only delete your own messages"
-            )
-        
-        # Delete message
-        await session.delete(message)
-        await session.commit()
-        
-        return SuccessResponse(
-            message="Message deleted successfully"
-        )
-        
-    except HTTPException:
-        raise
     except Exception as e:
+        logger.error(f"Error getting chat history: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error deleting message: {str(e)}"
+            detail="Failed to retrieve chat history"
         )
 
-@router.get("/matches/{match_id}/room", response_model=ChatRoomStatus)
-async def get_chat_room_status(
+@router.post("/{match_id}/messages", response_model=ChatMessageResponse)
+async def send_message(
     match_id: int,
-    current_user: User = Depends(current_active_user),
+    message_request: ChatMessageRequest,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Get chat room status and information"""
+    """Send a message to a match"""
     try:
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            match_id, current_user.id, session
-        )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Get chat room status
-        room_status = await chat_service.get_chat_room_status(
-            match_id, session
+        message = await chat_service.send_message_to_match(
+            match_id, 
+            current_user.id, 
+            message_request.message_text,
+            message_request.message_type,
+            session
         )
         
-        return room_status
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting chat room status: {str(e)}"
+        return ChatMessageResponse(
+            id=message.id,
+            match_id=message.match_id,
+            sender_id=message.sender_id,
+            message_text=message.message_text,
+            message_type=message.message_type,
+            created_at=message.created_at.isoformat(),
+            is_read=message.is_read
         )
-
-@router.post("/matches/{match_id}/typing")
-async def set_typing_status(
-    match_id: int,
-    is_typing: bool = Query(..., description="Whether user is typing"),
-    current_user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session)
-):
-    """Set typing status for a user in a chat room"""
-    try:
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            match_id, current_user.id, session
-        )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Set typing status
-        await chat_service.set_typing_status(
-            match_id, current_user.id, is_typing
-        )
-        
-        return SuccessResponse(
-            message=f"Typing status set to {is_typing}"
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error setting typing status: {str(e)}"
-        )
-
-@router.get("/matches/{match_id}/typing")
-async def get_typing_users(
-    match_id: int,
-    current_user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session)
-):
-    """Get users currently typing in a chat room"""
-    try:
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            match_id, current_user.id, session
-        )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Get typing users
-        typing_users = await chat_service.get_typing_users(match_id)
-        
-        return {
-            "match_id": match_id,
-            "typing_users": typing_users,
-            "count": len(typing_users)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting typing users: {str(e)}"
-        )
-
-@router.post("/matches/{match_id}/system-message")
-async def send_system_message(
-    match_id: int,
-    message_text: str = Query(..., description="System message text"),
-    current_user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session)
-):
-    """Send a system message in a chat room"""
-    try:
-        # Verify user is part of the match
-        match = await matching_service.get_match_details(
-            match_id, current_user.id, session
-        )
-        if not match:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Match not found"
-            )
-        
-        # Send system message
-        message = await chat_service.send_system_message(
-            match_id, message_text, session
-        )
-        
-        return ChatMessageSendResponse(
-            message=message,
-            status_message="System message sent successfully"
-        )
-        
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
+        logger.error(f"Error sending message: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error sending system message: {str(e)}"
-        ) 
+            detail="Failed to send message"
+        )
+
+@router.put("/{match_id}/messages/read")
+async def mark_messages_as_read(
+    match_id: int,
+    read_request: MessageReadRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Mark messages as read"""
+    try:
+        success = await chat_service.mark_messages_as_read(
+            match_id, current_user.id, read_request.message_ids, session
+        )
+        
+        if success:
+            return {"message": "Messages marked as read successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to mark messages as read"
+            )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error marking messages as read: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to mark messages as read"
+        )
+
+@router.get("/{match_id}/typing", response_model=TypingStatusResponse)
+async def get_typing_status(
+    match_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Get typing status for a match"""
+    try:
+        typing_users = await chat_service.get_typing_status(match_id, current_user.id, session)
+        return TypingStatusResponse(
+            match_id=match_id,
+            typing_users=typing_users
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error getting typing status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get typing status"
+        )
+
+@router.post("/{match_id}/messages/{message_id}/react")
+async def react_to_message(
+    match_id: int,
+    message_id: int,
+    reaction: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """React to a message (future feature)"""
+    # This is a placeholder for future message reaction functionality
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Message reactions not yet implemented"
+    )
+
+@router.delete("/{match_id}/messages/{message_id}")
+async def delete_message(
+    match_id: int,
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Delete a message (future feature)"""
+    # This is a placeholder for future message deletion functionality
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Message deletion not yet implemented"
+    ) 

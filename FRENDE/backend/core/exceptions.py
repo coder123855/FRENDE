@@ -262,6 +262,24 @@ class AIError(FrendeException):
             details=details
         )
 
+class AIGenerationError(AIError):
+    """Raised when AI task generation fails"""
+    
+    def __init__(self, message: str = "AI task generation failed", 
+                 task_type: Optional[str] = None,
+                 match_id: Optional[int] = None):
+        details = {}
+        if task_type:
+            details["task_type"] = task_type
+        if match_id:
+            details["match_id"] = match_id
+        
+        super().__init__(
+            message=message,
+            service="gemini",
+            details=details
+        )
+
 class FileUploadError(FrendeException):
     """Raised when file upload operations fail"""
     

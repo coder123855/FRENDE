@@ -1,77 +1,68 @@
-from typing import Optional, List
 from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 from datetime import datetime
-from enum import Enum
 
-class MessageType(str, Enum):
-    TEXT = "text"
-    TASK_SUBMISSION = "task_submission"
-    SYSTEM = "system"
+class ChatMessageRequest(BaseModel):
+    """Schema for chat message request"""
+    message_text: str = Field(..., min_length=1, max_length=1000, description="Message text")
+    message_type: str = Field(default="text", description="Message type (text, task_submission, system)")
 
-class ChatMessageCreate(BaseModel):
-    """Schema for creating a new chat message"""
-    message_text: str = Field(..., max_length=2000)
-    message_type: MessageType = MessageType.TEXT
-    task_id: Optional[int] = None
-
-class ChatMessageRead(BaseModel):
+class ChatMessageResponse(BaseModel):
     """Schema for chat message response"""
     id: int
     match_id: int
     sender_id: int
     message_text: str
-    message_type: MessageType
+    message_type: str
+    created_at: str  # ISO format datetime
+    is_read: bool = False
+    read_at: Optional[str] = None  # ISO format datetime
+    is_system_message: Optional[bool] = False
     task_id: Optional[int] = None
-    is_read: bool
-    is_system_message: bool
-    created_at: datetime
-    read_at: Optional[datetime] = None
-    
-    # Sender information
-    sender_name: Optional[str] = None
-    sender_username: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
-
-class ChatMessageListResponse(BaseModel):
-    """Schema for chat message list response"""
-    messages: List[ChatMessageRead]
-    total: int
-    page: int
-    size: int
-    unread_count: int
-
-class ChatMessageSendResponse(BaseModel):
-    """Schema for message send response"""
-    message: ChatMessageRead
-    status_message: str = "Message sent successfully"
-
-class ReadReceiptRequest(BaseModel):
-    """Schema for read receipt request"""
-    message_id: int
-
-class ReadReceiptResponse(BaseModel):
-    """Schema for read receipt response"""
-    message_id: int
-    read_at: datetime
-    message: str = "Message marked as read"
-
-class UnreadCountResponse(BaseModel):
-    """Schema for unread count response"""
+class ChatHistoryResponse(BaseModel):
+    """Schema for chat history response"""
     match_id: int
-    unread_count: int
-    last_message_at: Optional[datetime] = None
+    messages: List[Dict[str, Any]]
+    total_messages: int
+
+class ChatHistoryPage(BaseModel):
+    """Paginated chat history with cursors"""
+    match_id: int
+    messages: List[Dict[str, Any]]
+    page: Optional[int] = None
+    size: int
+    total: Optional[int] = None
+    has_more: bool
+    next_cursor: Optional[str] = None
+    prev_cursor: Optional[str] = None
+
+class MessageReadRequest(BaseModel):
+    """Schema for marking messages as read"""
+    message_ids: List[int] = Field(..., description="List of message IDs to mark as read")
+
+class TypingStatusResponse(BaseModel):
+    """Schema for typing status response"""
+    match_id: int
+    typing_users: List[int] = Field(default_factory=list, description="List of user IDs currently typing")
 
 class ChatRoomStatus(BaseModel):
     """Schema for chat room status"""
-    room_id: str
     match_id: int
-    is_active: bool
-    conversation_starter_id: Optional[int] = None
-    starter_message_sent: bool
-    auto_greeting_sent: bool
-    created_at: datetime
-    last_activity: datetime
     online_users: List[int]
-    typing_users: List[int] 
+    total_users: int
+    last_activity: Optional[str] = None  # ISO format datetime
+
+class SystemMessageRequest(BaseModel):
+    """Schema for system message request"""
+    message_text: str = Field(..., min_length=1, max_length=500, description="System message text")
+
+class ChatNotification(BaseModel):
+    """Schema for chat notifications"""
+    type: str = Field(..., description="Notification type")
+    match_id: int
+    user_id: int
+    message: str
+    timestamp: str  # ISO format datetime
+    data: Optional[Dict[str, Any]] = None 

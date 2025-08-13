@@ -1,14 +1,33 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { ariaUtils, formUtils } from "../../utils/accessibilityUtils";
 
 function Input({
   className,
   type,
+  ariaLabel,
+  ariaDescribedBy,
+  error,
   ...props
 }) {
+  const inputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (inputRef.current) {
+      ariaUtils.setupAriaRelationship(inputRef.current, ariaLabel, ariaDescribedBy);
+      
+      if (error) {
+        formUtils.associateError(inputRef.current, error);
+      } else {
+        formUtils.clearError(inputRef.current);
+      }
+    }
+  }, [ariaLabel, ariaDescribedBy, error]);
+
   return (
     <input
+      ref={inputRef}
       type={type}
       data-slot="input"
       className={cn(
