@@ -282,4 +282,7 @@ const useTaskSubmission = () => {
   };
 };
 
-export default useTaskSubmission; 
+export default useTaskSubmission;
+
+// Named export for consistency
+export { useTaskSubmission }; 

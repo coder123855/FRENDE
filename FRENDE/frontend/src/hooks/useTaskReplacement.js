@@ -197,4 +197,7 @@ const useTaskReplacement = (matchId) => {
   };
 };
 
-export default useTaskReplacement; 
+export default useTaskReplacement;
+
+// Named export for consistency
+export { useTaskReplacement }; 

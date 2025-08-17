@@ -1,6 +1,15 @@
+import React from 'react';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import useCompatibleUsers from '../useCompatibleUsers';
 import { userAPI } from '../../lib/api';
+import { OptimisticProvider } from '../../contexts/OptimisticContext';
+
+// Wrapper component for tests
+const TestWrapper = ({ children }) => (
+  <OptimisticProvider>
+    {children}
+  </OptimisticProvider>
+);
 
 jest.mock('../../lib/api', () => ({
   userAPI: {
@@ -14,7 +23,7 @@ describe('useCompatibleUsers', () => {
   });
 
   it('should initialize with empty state', () => {
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     expect(result.current.compatibleUsers).toEqual([]);
     expect(result.current.loading).toBe(false);
@@ -34,7 +43,7 @@ describe('useCompatibleUsers', () => {
 
     userAPI.getCompatibleUsers.mockResolvedValue({ data: mockUsers });
 
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -49,7 +58,7 @@ describe('useCompatibleUsers', () => {
     const error = new Error('Failed to fetch users');
     userAPI.getCompatibleUsers.mockRejectedValue(error);
 
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -69,7 +78,7 @@ describe('useCompatibleUsers', () => {
     };
     userAPI.getCompatibleUsers.mockRejectedValue(error);
 
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -100,7 +109,7 @@ describe('useCompatibleUsers', () => {
       .mockResolvedValueOnce({ data: initialUsers })
       .mockResolvedValueOnce({ data: moreUsers });
 
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -140,7 +149,7 @@ describe('useCompatibleUsers', () => {
       .mockResolvedValueOnce({ data: initialUsers })
       .mockResolvedValueOnce({ data: refreshedUsers });
 
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -175,7 +184,7 @@ describe('useCompatibleUsers', () => {
 
     userAPI.getCompatibleUsers.mockResolvedValue({ data: users });
 
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -207,7 +216,7 @@ describe('useCompatibleUsers', () => {
 
     userAPI.getCompatibleUsers.mockResolvedValue({ data: users });
 
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -231,7 +240,7 @@ describe('useCompatibleUsers', () => {
 
     userAPI.getCompatibleUsers.mockResolvedValue({ data: users });
 
-    const { result } = renderHook(() => useCompatibleUsers(1));
+    const { result } = renderHook(() => useCompatibleUsers(1), { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -245,7 +254,7 @@ describe('useCompatibleUsers', () => {
       new Promise(resolve => setTimeout(() => resolve({ data: [] }), 100))
     );
 
-    const { result } = renderHook(() => useCompatibleUsers());
+    const { result } = renderHook(() => useCompatibleUsers(), { wrapper: TestWrapper });
 
     act(() => {
       result.current.loadMore();

@@ -1,0 +1,101 @@
+name: Frontend Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'FRENDE/frontend/**'
+      - '.github/workflows/frontend-tests.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'FRENDE/frontend/**'
+      - '.github/workflows/frontend-tests.yml'
+
+jobs:
+  test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: FRENDE/frontend/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: FRENDE/frontend
+      run: npm ci
+      
+    - name: Run linting
+      working-directory: FRENDE/frontend
+      run: npm run lint
+      
+    - name: Run type checking
+      working-directory: FRENDE/frontend
+      run: npm run type-check
+      
+    - name: Run unit tests
+      working-directory: FRENDE/frontend
+      run: npm run test:ci
+      
+    - name: Run performance tests
+      working-directory: FRENDE/frontend
+      run: npm run test:performance
+      
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: FRENDE/frontend/coverage/lcov.info
+        flags: frontend
+        name: frontend-coverage
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: frontend-test-results-${{ matrix.node-version }}
+        path: |
+          FRENDE/frontend/coverage/
+          FRENDE/frontend/test-results/
+        retention-days: 7
+
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        cache-dependency-path: FRENDE/frontend/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: FRENDE/frontend
+      run: npm ci
+      
+    - name: Build application
+      working-directory: FRENDE/frontend
+      run: npm run build
+      
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: frontend-build
+        path: FRENDE/frontend/dist/
+        retention-days: 1

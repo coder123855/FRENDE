@@ -1,37 +1,8 @@
-from typing import Optional
 from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List
 from datetime import datetime
 
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=8)
-    username: Optional[str] = None
-    name: Optional[str] = None
-    age: Optional[int] = Field(None, ge=13, le=100)
-    profession: Optional[str] = None
-    profile_text: Optional[str] = Field(None, max_length=500)
-    community: Optional[str] = None
-    location: Optional[str] = None
-    interests: Optional[str] = None  # JSON string of interest tags
-    age_preference_min: Optional[int] = Field(None, ge=18, le=100)
-    age_preference_max: Optional[int] = Field(None, ge=18, le=100)
-
-class UserUpdate(BaseModel):
-    username: Optional[str] = None
-    name: Optional[str] = None
-    age: Optional[int] = Field(None, ge=13, le=100)
-    profession: Optional[str] = None
-    profile_text: Optional[str] = Field(None, max_length=500)
-    profile_picture_url: Optional[str] = None
-    community: Optional[str] = None
-    location: Optional[str] = None
-    interests: Optional[str] = None  # JSON string of interest tags
-    age_preference_min: Optional[int] = Field(None, ge=18, le=100)
-    age_preference_max: Optional[int] = Field(None, ge=18, le=100)
-
-class UserRead(BaseModel):
-    id: int
-    email: str
+class UserBase(BaseModel):
     username: Optional[str] = None
     name: Optional[str] = None
     age: Optional[int] = None
@@ -43,13 +14,24 @@ class UserRead(BaseModel):
     interests: Optional[str] = None
     age_preference_min: Optional[int] = None
     age_preference_max: Optional[int] = None
+
+class UserCreate(UserBase):
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+    username: str = Field(..., min_length=3, max_length=50)
+
+class UserUpdate(UserBase):
+    pass
+
+class UserRead(UserBase):
+    id: int
+    email: EmailStr
+    is_active: bool
+    is_superuser: bool
+    is_verified: bool
     available_slots: int
     total_slots_used: int
     coins: int
-    slot_reset_time: Optional[datetime] = None
-    last_slot_purchase: Optional[datetime] = None
-    is_active: bool
-    is_verified: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -62,9 +44,39 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: UserRead
+    session_id: Optional[int] = None
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+class RefreshTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+class SessionInfo(BaseModel):
+    session_id: int
+    created_at: datetime
+    last_activity: datetime
+    refresh_token_id: Optional[int] = None
+
+class UserSessionsResponse(BaseModel):
+    sessions: List[SessionInfo]
+    total_sessions: int
 
 class PasswordChangeRequest(BaseModel):
     current_password: str
+    new_password: str = Field(..., min_length=8)
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str
     new_password: str = Field(..., min_length=8) 

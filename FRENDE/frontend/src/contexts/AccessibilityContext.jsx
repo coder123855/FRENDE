@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 
 const AccessibilityContext = createContext();
 
+export { AccessibilityContext };
+
 export const useAccessibility = () => {
   const context = useContext(AccessibilityContext);
   if (!context) {

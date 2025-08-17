@@ -299,4 +299,7 @@ const useTaskHistory = (matchId = null) => {
   };
 };
 
-export default useTaskHistory; 
+export default useTaskHistory;
+
+// Named export for consistency
+export { useTaskHistory }; 

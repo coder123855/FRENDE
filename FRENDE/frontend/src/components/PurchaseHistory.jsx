@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
+import React from 'react';
 import { Calendar, Coins } from 'lucide-react';
 import CoinBalance from './CoinBalance';
 

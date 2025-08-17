@@ -1,70 +1,74 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from contextlib import asynccontextmanager
+from fastapi.staticfiles import StaticFiles
 import uvicorn
+import logging
+from contextlib import asynccontextmanager
 
 from core.config import settings
+from core.logging_config import configure_logging
+from core.middleware import setup_middleware
+from core.websocket import setup_websocket
 from core.database import engine, Base
-from core.logging_middleware import LoggingMiddleware
-from core.security_middleware import SecurityHeadersMiddleware
-from core.monitoring import get_system_monitor
-from core.websocket import manager
 
-# Import routers
-from api.auth import router as auth_router
-from api.users import router as users_router
-from api.matches import router as matches_router
-from api.tasks import router as tasks_router
-from api.chat import router as chat_router
-from api.match_requests import router as match_requests_router
-from api.coin_rewards import router as coin_rewards_router
-from api.task_submissions import router as task_submissions_router
-from api.conversation_starter import router as conversation_starter_router
-from api.automatic_greeting import router as automatic_greeting_router
-from api.task_chat import router as task_chat_router
-import logging
-from datetime import datetime
-import os
+# Import API routers
+from api import auth, users, matches, tasks, chat, queue, conversation_starter, match_requests, coin_rewards, automatic_greeting, task_chat, task_submissions
+from api.health import router as health_router
+from api.metrics import router as metrics_router
+from api.monitoring_dashboard import router as monitoring_router
+
+# Import monitoring components
+from core.ai_health_check import ai_health_checker
+from core.websocket_monitor import websocket_monitor
+from core.external_service_monitor import external_service_monitor
+from api.metrics import MetricsMiddleware
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application lifespan manager"""
     # Startup
-    logger.info("Starting Frende API server...")
+    logger.info("Starting Frende Backend Application...")
     
     # Create database tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     
-    # Start background tasks
-    from services.background_tasks import background_processor
-    background_processor.start_background_tasks()
+    # Initialize monitoring components
+    if settings.PERFORMANCE_MONITORING_ENABLED:
+        logger.info("Performance monitoring initialized")
     
-    logger.info("Frende API server started successfully")
+    # Start background monitoring tasks
+    import asyncio
+    asyncio.create_task(ai_health_checker.run_continuous_monitoring())
+    asyncio.create_task(websocket_monitor.run_continuous_monitoring())
+    asyncio.create_task(external_service_monitor.run_continuous_monitoring())
+    
+    logger.info("Frende Backend Application started successfully")
     
     yield
     
     # Shutdown
-    logger.info("Shutting down Frende API server...")
-    
-    # Stop background tasks
-    background_processor.stop_background_tasks()
-    
-    logger.info("Frende API server shutdown complete")
+    logger.info("Shutting down Frende Backend Application...")
 
 # Create FastAPI app
 app = FastAPI(
-    title="Frende API",
-    description="API for the Frende friend matching application",
+    title="Frende Backend API",
+    description="AI-powered social media app for making new friends",
     version="1.0.0",
     lifespan=lifespan
 )
 
-# Add middleware
+# Setup middleware
+setup_middleware(app)
+
+# Add metrics middleware
+app.add_middleware(MetricsMiddleware)
+
+# Setup CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_cors_origins(),
@@ -73,60 +77,59 @@ app.add_middleware(
     allow_headers=settings.get_cors_headers(),
 )
 
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])  # Allow all hosts for development
-app.add_middleware(LoggingMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
+# Setup WebSocket
+setup_websocket(app)
 
-# Include routers
-app.include_router(auth_router)
-app.include_router(users_router)
-app.include_router(matches_router)
-app.include_router(tasks_router)
-app.include_router(chat_router)
-app.include_router(match_requests_router)
-app.include_router(coin_rewards_router)
-app.include_router(task_submissions_router)
-app.include_router(conversation_starter_router)
-app.include_router(automatic_greeting_router)
-app.include_router(task_chat_router)
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.on_event("startup")
-async def startup_event():
-    """Application startup event"""
-    logger.info("Application startup complete")
+# Include API routers
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(users.router, prefix="/api/v1")
+app.include_router(matches.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1")
+app.include_router(queue.router, prefix="/api/v1")
+app.include_router(conversation_starter.router, prefix="/api/v1")
+app.include_router(match_requests.router, prefix="/api/v1")
+app.include_router(coin_rewards.router, prefix="/api/v1")
+app.include_router(automatic_greeting.router, prefix="/api/v1")
+app.include_router(task_chat.router, prefix="/api/v1")
+app.include_router(task_submissions.router, prefix="/api/v1")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Application shutdown event"""
-    logger.info("Application shutdown complete")
+# Include monitoring routers
+app.include_router(health_router, prefix="/api/v1")
+app.include_router(metrics_router, prefix="/api/v1")
+app.include_router(monitoring_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {
-        "message": "Welcome to Frende API",
+        "message": "Welcome to Frende Backend API",
         "version": "1.0.0",
-        "status": "running",
-        "timestamp": datetime.utcnow().isoformat()
+        "environment": settings.ENVIRONMENT,
+        "docs": "/docs",
+        "health": "/api/v1/health",
+        "metrics": "/api/v1/metrics"
     }
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    monitor = get_system_monitor()
+@app.get("/api/v1")
+async def api_root():
+    """API root endpoint"""
     return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "system_metrics": monitor.get_performance_metrics()
-    }
-
-@app.get("/metrics")
-async def get_metrics():
-    """Get application metrics"""
-    monitor = get_system_monitor()
-    return {
-        "system_metrics": monitor.get_performance_metrics(),
-        "timestamp": datetime.utcnow().isoformat()
+        "message": "Frende Backend API v1.0.0",
+        "endpoints": {
+            "auth": "/api/v1/auth",
+            "users": "/api/v1/users",
+            "matches": "/api/v1/matches",
+            "tasks": "/api/v1/tasks",
+            "chat": "/api/v1/chat",
+            "health": "/api/v1/health",
+            "metrics": "/api/v1/metrics",
+            "monitoring": "/api/v1/monitoring"
+        },
+        "documentation": "/docs"
     }
 
 if __name__ == "__main__":
@@ -135,5 +138,5 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
-        log_level="info"
+        log_level=settings.LOG_LEVEL.lower()
     ) 

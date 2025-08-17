@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { taskApi, TaskApiError } from '../lib/taskApi';
 import { useOfflineTasks, useOfflineState } from './useOffline.js';
+import { useCachedData } from './useCache.js';
+import { getTTL } from '../config/cacheConfig.js';
 
 export const useTasks = (matchId, userId) => {
   const [tasks, setTasks] = useState([]);
@@ -26,6 +28,24 @@ export const useTasks = (matchId, userId) => {
     refreshTasks: refreshOfflineTasks 
   } = useOfflineTasks();
 
+  // Cache-aware data fetching for tasks
+  const {
+    data: cachedTasks,
+    loading: cacheLoading,
+    error: cacheError,
+    isFromCache,
+    refresh: refreshCache,
+  } = useCachedData(
+    matchId ? `/api/matches/${matchId}/tasks` : null,
+    {
+      dataType: 'tasks',
+      ttl: getTTL('TASKS'),
+      strategy: 'stale-while-revalidate',
+      refreshInterval: 5 * 60 * 1000, // 5 minutes
+      enabled: !!matchId && isOnline,
+    }
+  );
+
   // Fetch tasks for a match with offline fallback
   const fetchTasks = useCallback(async () => {
     if (!matchId) return;
@@ -41,30 +61,36 @@ export const useTasks = (matchId, userId) => {
     abortControllerRef.current = new AbortController();
     
     try {
-      // Try online first
+      // Try online first with cache support
       if (isOnline) {
-        const tasksData = await taskApi.getMatchTasks(matchId);
-        setTasks(tasksData || []);
-        setIsOfflineMode(false);
-        
-        // Save to offline storage
-        if (tasksData) {
-          for (const task of tasksData) {
-            await saveTaskOffline(task);
+        // Use cached data if available
+        if (cachedTasks && !cacheLoading) {
+          setTasks(cachedTasks);
+          setIsOfflineMode(false);
+        } else {
+          const tasksData = await taskApi.getMatchTasks(matchId);
+          setTasks(tasksData || []);
+          setIsOfflineMode(false);
+          
+          // Save to offline storage
+          if (tasksData) {
+            for (const task of tasksData) {
+              await saveTaskOffline(task);
+            }
           }
         }
         
         // Fetch progress for each task
-        if (userId && tasksData) {
-          const progressPromises = tasksData.map(task => 
+        if (userId && tasks) {
+          const progressPromises = tasks.map(task => 
             taskApi.getTaskProgress(task.id, userId).catch(() => null)
           );
           const progressResults = await Promise.all(progressPromises);
           
           const progressMap = {};
           progressResults.forEach((progress, index) => {
-            if (progress && tasksData[index]) {
-              progressMap[tasksData[index].id] = progress;
+            if (progress && tasks[index]) {
+              progressMap[tasks[index].id] = progress;
             }
           });
           setTaskProgress(progressMap);
@@ -94,7 +120,7 @@ export const useTasks = (matchId, userId) => {
       setLoading(false);
       abortControllerRef.current = null;
     }
-  }, [matchId, userId, isOnline, offlineTasks, saveTaskOffline, hasOfflineTasks]);
+  }, [matchId, userId, isOnline, cachedTasks, cacheLoading, tasks, offlineTasks, saveTaskOffline, hasOfflineTasks]);
 
   // Refresh tasks
   const refreshTasks = useCallback(async () => {

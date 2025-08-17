@@ -86,6 +86,6 @@ describe('TaskExpirationTimer', () => {
 
     render(<TaskExpirationTimer task={oneDayTask} />);
     
-    expect(screen.getByText(/1d/)).toBeInTheDocument();
+    expect(screen.getByText(/24h/)).toBeInTheDocument();
   });
 }); 

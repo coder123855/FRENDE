@@ -1,0 +1,317 @@
+# Load Test Configuration for Frende Application
+# This file defines various load test scenarios and configurations
+
+# Base configuration
+base_url: "http://localhost:8000"
+output_dir: "./load_test_results"
+log_level: "INFO"
+
+# Test modes: single, scenario, distributed, suite
+test_mode: "scenario"
+
+# Parallel test execution
+parallel_tests: 2
+retry_failed: true
+max_retries: 3
+cleanup_after_test: true
+
+# Single test configurations
+single_tests:
+  - name: "Basic Load Test"
+    concurrent_users: 100
+    duration_seconds: 300
+    ramp_up_seconds: 60
+    ramp_down_seconds: 60
+    timeout_seconds: 30
+    max_memory_mb: 512
+    
+  - name: "Medium Load Test"
+    concurrent_users: 500
+    duration_seconds: 600
+    ramp_up_seconds: 120
+    ramp_down_seconds: 120
+    timeout_seconds: 30
+    max_memory_mb: 1024
+    
+  - name: "High Load Test"
+    concurrent_users: 1000
+    duration_seconds: 900
+    ramp_up_seconds: 180
+    ramp_down_seconds: 180
+    timeout_seconds: 45
+    max_memory_mb: 2048
+
+# Scenario configurations
+scenarios:
+  - "Peak Hour Simulation"
+  - "Flash Crowd Simulation"
+  - "Sustained Load Simulation"
+  - "Mixed Workload Simulation"
+  - "Stress Test"
+  - "Spike Test"
+
+# Distributed test configurations
+distributed_tests:
+  - name: "Small Distributed Test"
+    base_url: "http://localhost:8000"
+    scenario_name: "Peak Hour Simulation"
+    nodes:
+      - node_id: "coordinator"
+        host: "localhost"
+        port: 8001
+        max_concurrent_users: 100
+        is_coordinator: true
+      - node_id: "node1"
+        host: "localhost"
+        port: 8002
+        max_concurrent_users: 200
+        is_coordinator: false
+      - node_id: "node2"
+        host: "localhost"
+        port: 8003
+        max_concurrent_users: 200
+        is_coordinator: false
+    sync_interval: 1.0
+    timeout_seconds: 30
+    max_memory_mb: 512
+    
+  - name: "Large Distributed Test"
+    base_url: "http://localhost:8000"
+    scenario_name: "Stress Test"
+    nodes:
+      - node_id: "coordinator"
+        host: "localhost"
+        port: 8001
+        max_concurrent_users: 200
+        is_coordinator: true
+      - node_id: "node1"
+        host: "localhost"
+        port: 8002
+        max_concurrent_users: 500
+        is_coordinator: false
+      - node_id: "node2"
+        host: "localhost"
+        port: 8003
+        max_concurrent_users: 500
+        is_coordinator: false
+      - node_id: "node3"
+        host: "localhost"
+        port: 8004
+        max_concurrent_users: 500
+        is_coordinator: false
+      - node_id: "node4"
+        host: "localhost"
+        port: 8005
+        max_concurrent_users: 500
+        is_coordinator: false
+    sync_interval: 1.0
+    timeout_seconds: 45
+    max_memory_mb: 1024
+
+# Test suite configurations
+suite:
+  name: "Complete Load Test Suite"
+  description: "Comprehensive load testing for Frende application"
+  
+  # Single tests to run
+  single_tests:
+    - name: "Basic Load Test"
+      concurrent_users: 100
+      duration_seconds: 300
+      ramp_up_seconds: 60
+      ramp_down_seconds: 60
+      timeout_seconds: 30
+      max_memory_mb: 512
+      
+    - name: "Medium Load Test"
+      concurrent_users: 500
+      duration_seconds: 600
+      ramp_up_seconds: 120
+      ramp_down_seconds: 120
+      timeout_seconds: 30
+      max_memory_mb: 1024
+  
+  # Scenarios to run
+  scenarios:
+    - "Peak Hour Simulation"
+    - "Flash Crowd Simulation"
+    - "Sustained Load Simulation"
+  
+  # Distributed tests to run
+  distributed_tests:
+    - name: "Small Distributed Test"
+      base_url: "http://localhost:8000"
+      scenario_name: "Peak Hour Simulation"
+      nodes:
+        - node_id: "coordinator"
+          host: "localhost"
+          port: 8001
+          max_concurrent_users: 100
+          is_coordinator: true
+        - node_id: "node1"
+          host: "localhost"
+          port: 8002
+          max_concurrent_users: 200
+          is_coordinator: false
+      sync_interval: 1.0
+      timeout_seconds: 30
+      max_memory_mb: 512
+
+# Performance thresholds
+performance_thresholds:
+  response_time_p95_max_ms: 2000
+  throughput_min_req_per_sec: 100
+  error_rate_max_percent: 1.0
+  cpu_usage_max_percent: 80
+  memory_usage_max_percent: 85
+
+# Monitoring configuration
+monitoring:
+  interval_seconds: 1.0
+  save_metrics: true
+  generate_plots: true
+  alert_on_threshold_exceeded: true
+  
+  # Alert thresholds
+  alerts:
+    cpu_usage_threshold: 85
+    memory_usage_threshold: 90
+    response_time_threshold: 5000
+    error_rate_threshold: 5.0
+
+# Database monitoring (if available)
+database_monitoring:
+  enabled: false
+  connection_string: "postgresql://user:password@localhost:5432/frende"
+  slow_query_threshold_ms: 1000
+  max_connections_threshold: 80
+
+# WebSocket monitoring
+websocket_monitoring:
+  enabled: true
+  connection_timeout_seconds: 30
+  max_connections_threshold: 1000
+  message_rate_threshold_per_sec: 100
+
+# Reporting configuration
+reporting:
+  generate_html_reports: true
+  generate_plots: true
+  save_raw_data: true
+  include_system_metrics: true
+  include_application_metrics: true
+  include_database_metrics: false
+  
+  # Report formats
+  formats:
+    - "html"
+    - "json"
+    - "csv"
+  
+  # Email notifications (optional)
+  email_notifications:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    sender_email: "loadtest@example.com"
+    recipient_emails: []
+    send_on_failure: true
+    send_on_completion: true
+
+# Environment-specific configurations
+environments:
+  development:
+    base_url: "http://localhost:8000"
+    concurrent_users: 50
+    duration_seconds: 180
+    
+  staging:
+    base_url: "https://staging.frende.com"
+    concurrent_users: 200
+    duration_seconds: 600
+    
+  production:
+    base_url: "https://frende.com"
+    concurrent_users: 1000
+    duration_seconds: 1800
+
+# User behavior patterns
+user_behaviors:
+  casual_user:
+    description: "Light usage pattern"
+    think_time_min_seconds: 5
+    think_time_max_seconds: 15
+    request_probability: 0.3
+    
+  active_user:
+    description: "Moderate usage pattern"
+    think_time_min_seconds: 2
+    think_time_max_seconds: 8
+    request_probability: 0.6
+    
+  power_user:
+    description: "Heavy usage pattern"
+    think_time_min_seconds: 1
+    think_time_max_seconds: 4
+    request_probability: 0.8
+    
+  chat_focused_user:
+    description: "Chat-intensive usage pattern"
+    think_time_min_seconds: 0.5
+    think_time_max_seconds: 2
+    request_probability: 0.9
+
+# API endpoint configurations
+api_endpoints:
+  auth:
+    login: "/auth/login"
+    register: "/auth/register"
+    refresh: "/auth/refresh"
+    
+  users:
+    profile: "/users/profile"
+    update_profile: "/users/profile"
+    
+  matching:
+    compatible_users: "/matching/compatible-users"
+    send_request: "/matching/send-request"
+    accept_request: "/matching/accept-request"
+    purchase_slots: "/matching/purchase-slots"
+    
+  chat:
+    send_message: "/chat/send-message"
+    history: "/chat/history/{match_id}"
+    typing: "/chat/typing/{match_id}"
+    
+  tasks:
+    current: "/tasks/current"
+    completed: "/tasks/completed"
+    submit: "/tasks/submit"
+
+# Test data configuration
+test_data:
+  # User data generation
+  users:
+    count: 1000
+    age_range: [18, 65]
+    communities: ["Tech", "Art", "Sports", "Music", "Gaming"]
+    locations: ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix"]
+    
+  # Chat data generation
+  chat:
+    messages_per_match: [10, 50]
+    message_length_range: [10, 200]
+    
+  # Task data generation
+  tasks:
+    count: 100
+    categories: ["Social", "Creative", "Physical", "Learning", "Entertainment"]
+
+# Cleanup configuration
+cleanup:
+  enabled: true
+  remove_test_users: true
+  remove_test_matches: true
+  remove_test_messages: true
+  remove_test_tasks: true
+  reset_database_state: false

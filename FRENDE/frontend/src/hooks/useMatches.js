@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { matchAPI } from '../lib/api';
-import socketClient from '../lib/socket';
+import { useSocket } from './useSocket';
+import { useOptimisticUpdate } from './useOptimisticUpdate';
 
 export const useMatches = () => {
+  const socket = useSocket();
+  const optimisticUpdate = useOptimisticUpdate({ type: 'immediate' });
   const [matches, setMatches] = useState([]);
   const [pendingMatches, setPendingMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
@@ -15,11 +18,9 @@ export const useMatches = () => {
   const socketConnected = useRef(false);
   const expirationTimers = useRef(new Map());
 
-  // Initialize socket connection
+  // Initialize socket connection and event listeners
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    if (token && !socketConnected.current) {
-      socketClient.connect(token);
+    if (socket.isConnected && !socketConnected.current) {
       setupSocketListeners();
       socketConnected.current = true;
     }
@@ -27,73 +28,105 @@ export const useMatches = () => {
     return () => {
       cleanupExpirationTimers();
     };
-  }, []);
+  }, [socket.isConnected]);
 
   // Setup socket event listeners
   const setupSocketListeners = useCallback(() => {
-    socketClient.onMatchStatusUpdate((data) => {
-      console.log('Match status update received:', data);
-      updateMatchStatus(data.match_id, data.status, data);
-    });
+    const cleanupListeners = [
+      socket.on('match_status_update', handleMatchStatusUpdate),
+      socket.on('match_expired', handleMatchExpiredFromSocket),
+      socket.on('match_request_received', handleMatchRequestReceived),
+      socket.on('match_accepted', handleMatchAccepted),
+      socket.on('match_rejected', handleMatchRejected)
+    ];
 
-    socketClient.onMatchExpired((data) => {
-      console.log('Match expired:', data);
-      handleMatchExpired(data.match_id);
-    });
+    return () => {
+      cleanupListeners.forEach(cleanup => cleanup && cleanup());
+    };
+  }, [socket]);
 
-    socketClient.onMatchRequestReceived((data) => {
-      console.log('New match request received:', data);
-      addNewMatch(data);
-    });
+  // Handle match status update
+  const handleMatchStatusUpdate = useCallback((data) => {
+    console.log('Match status update received:', data);
+    updateMatchStatus(data.match_id, data.status, data);
+  }, []);
 
-    socketClient.onMatchAccepted((data) => {
-      console.log('Match accepted:', data);
-      updateMatchStatus(data.match_id, 'active', data);
-    });
+  // Handle match expired from socket
+  const handleMatchExpiredFromSocket = useCallback((data) => {
+    console.log('Match expired from socket:', data);
+    // We'll call the local handler directly to avoid circular dependency
+    updateMatchStatus(data.match_id, 'expired');
+    
+    // Clear expiration timer
+    if (expirationTimers.current.has(data.match_id)) {
+      clearTimeout(expirationTimers.current.get(data.match_id));
+      expirationTimers.current.delete(data.match_id);
+    }
+  }, []);
 
-    socketClient.onMatchRejected((data) => {
-      console.log('Match rejected:', data);
-      updateMatchStatus(data.match_id, 'rejected', data);
-    });
+  // Handle new match request
+  const handleMatchRequestReceived = useCallback((data) => {
+    console.log('New match request received:', data);
+    addNewMatch(data);
+  }, []);
+
+  // Handle match accepted
+  const handleMatchAccepted = useCallback((data) => {
+    console.log('Match accepted:', data);
+    updateMatchStatus(data.match_id, 'active', data);
+  }, []);
+
+  // Handle match rejected
+  const handleMatchRejected = useCallback((data) => {
+    console.log('Match rejected:', data);
+    updateMatchStatus(data.match_id, 'rejected', data);
   }, []);
 
   // Fetch matches from API
-  const fetchMatches = useCallback(async (status = null) => {
-    setLoading(true);
-    setError(null);
-    
+  const fetchMatches = useCallback(async () => {
     try {
-      const response = await matchAPI.getMatches(status);
+      setLoading(true);
+      setError(null);
+      
+      const response = await matchAPI.getMatches();
       const matchesData = response.data;
       
       setMatches(matchesData);
       
-      // Categorize matches by status
-      const pending = matchesData.filter(match => match.status === 'pending');
-      const active = matchesData.filter(match => match.status === 'active');
-      const expired = matchesData.filter(match => match.status === 'expired');
+      // Categorize matches
+      categorizeMatches(matchesData);
       
-      setPendingMatches(pending);
-      setActiveMatches(active);
-      setExpiredMatches(expired);
-      
-      // Setup expiration timers for pending matches
-      setupExpirationTimers(pending);
+      // Set up expiration timers
+      setupExpirationTimers(matchesData);
       
     } catch (err) {
-      console.error('Error fetching matches:', err);
       setError(err.response?.data?.detail || 'Failed to fetch matches');
+      console.error('Error fetching matches:', err);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Setup expiration timers for matches
-  const setupExpirationTimers = useCallback((matches) => {
+  // Categorize matches by status
+  const categorizeMatches = useCallback((matchesData) => {
+    const pending = matchesData.filter(match => match.status === 'pending');
+    const active = matchesData.filter(match => match.status === 'active');
+    const expired = matchesData.filter(match => match.status === 'expired');
+    
+    setPendingMatches(pending);
+    setActiveMatches(active);
+    setExpiredMatches(expired);
+  }, []);
+
+  // Set up expiration timers for pending matches
+  const setupExpirationTimers = useCallback((matchesData) => {
+    // Clear existing timers
     cleanupExpirationTimers();
     
-    matches.forEach(match => {
-      if (match.status === 'pending' && match.expires_at) {
+    const pendingMatches = matchesData.filter(match => match.status === 'pending');
+    
+    pendingMatches.forEach(match => {
+      if (match.expires_at) {
         const expiresAt = new Date(match.expires_at);
         const now = new Date();
         const timeUntilExpiry = expiresAt.getTime() - now.getTime();
@@ -112,127 +145,200 @@ export const useMatches = () => {
     });
   }, []);
 
-  // Cleanup expiration timers
+  // Clean up expiration timers
   const cleanupExpirationTimers = useCallback(() => {
     expirationTimers.current.forEach(timer => clearTimeout(timer));
     expirationTimers.current.clear();
   }, []);
 
+  // Update match status
+  const updateMatchStatus = useCallback((matchId, newStatus, data = {}) => {
+    setMatches(prev => prev.map(match => 
+      match.id === matchId 
+        ? { ...match, status: newStatus, ...data }
+        : match
+    ));
+    
+    // Re-categorize matches
+    setMatches(prev => {
+      categorizeMatches(prev);
+      return prev;
+    });
+  }, [categorizeMatches]);
+
   // Handle match expiration
   const handleMatchExpired = useCallback((matchId) => {
-    setMatches(prev => 
-      prev.map(match => 
-        match.id === matchId 
-          ? { ...match, status: 'expired' }
-          : match
-      )
-    );
+    updateMatchStatus(matchId, 'expired');
     
-    setPendingMatches(prev => prev.filter(match => match.id !== matchId));
-    setExpiredMatches(prev => {
-      const expiredMatch = matches.find(match => match.id === matchId);
-      return expiredMatch ? [...prev, { ...expiredMatch, status: 'expired' }] : prev;
-    });
-    
-    // Clear timer for this match
-    const timer = expirationTimers.current.get(matchId);
-    if (timer) {
-      clearTimeout(timer);
+    // Clear expiration timer
+    if (expirationTimers.current.has(matchId)) {
+      clearTimeout(expirationTimers.current.get(matchId));
       expirationTimers.current.delete(matchId);
     }
-  }, [matches]);
-
-  // Update match status
-  const updateMatchStatus = useCallback((matchId, newStatus, matchData = null) => {
-    setMatches(prev => 
-      prev.map(match => 
-        match.id === matchId 
-          ? { ...match, ...matchData, status: newStatus }
-          : match
-      )
-    );
-    
-    // Update categorized lists
-    if (newStatus === 'pending') {
-      setPendingMatches(prev => {
-        const existing = prev.find(m => m.id === matchId);
-        if (existing) {
-          return prev.map(m => m.id === matchId ? { ...m, ...matchData, status: newStatus } : m);
-        } else {
-          return [...prev, { ...matchData, status: newStatus }];
-        }
-      });
-    } else if (newStatus === 'active') {
-      setPendingMatches(prev => prev.filter(m => m.id !== matchId));
-      setActiveMatches(prev => {
-        const existing = prev.find(m => m.id === matchId);
-        if (existing) {
-          return prev.map(m => m.id === matchId ? { ...m, ...matchData, status: newStatus } : m);
-        } else {
-          return [...prev, { ...matchData, status: newStatus }];
-        }
-      });
-    } else if (newStatus === 'expired') {
-      setPendingMatches(prev => prev.filter(m => m.id !== matchId));
-      setActiveMatches(prev => prev.filter(m => m.id !== matchId));
-      setExpiredMatches(prev => {
-        const existing = prev.find(m => m.id === matchId);
-        if (existing) {
-          return prev.map(m => m.id === matchId ? { ...m, ...matchData, status: newStatus } : m);
-        } else {
-          return [...prev, { ...matchData, status: newStatus }];
-        }
-      });
-    }
-  }, []);
+  }, [updateMatchStatus]);
 
   // Add new match
   const addNewMatch = useCallback((matchData) => {
-    setMatches(prev => [...prev, matchData]);
+    const newMatch = {
+      id: matchData.match_id,
+      status: 'pending',
+      ...matchData
+    };
     
-    if (matchData.status === 'pending') {
-      setPendingMatches(prev => [...prev, matchData]);
-      setupExpirationTimers([matchData]);
+    setMatches(prev => [...prev, newMatch]);
+    
+    // Re-categorize matches
+    setMatches(prev => {
+      categorizeMatches(prev);
+      return prev;
+    });
+    
+    // Set up expiration timer for new match
+    if (newMatch.expires_at) {
+      const expiresAt = new Date(newMatch.expires_at);
+      const now = new Date();
+      const timeUntilExpiry = expiresAt.getTime() - now.getTime();
+      
+      if (timeUntilExpiry > 0) {
+        const timer = setTimeout(() => {
+          handleMatchExpired(newMatch.id);
+        }, timeUntilExpiry);
+        
+        expirationTimers.current.set(newMatch.id, timer);
+      }
     }
-  }, [setupExpirationTimers]);
+  }, [categorizeMatches, handleMatchExpired]);
 
   // Accept match
   const acceptMatch = useCallback(async (matchId) => {
+    const match = getMatchById(matchId);
+    if (!match) return;
+
+    // Optimistic update
+    const optimisticId = `accept_match_${matchId}`;
+    const optimisticData = { ...match, status: 'active', _isOptimistic: true };
+    
+    const rollbackFn = () => {
+      updateMatchStatus(matchId, match.status, match);
+    };
+
+    optimisticUpdate.createUpdate(optimisticId, optimisticData, rollbackFn, {
+      onSuccess: (result) => {
+        updateMatchStatus(matchId, 'active', result);
+      },
+      onError: (error) => {
+        const errorMessage = error.message || 'Failed to accept match';
+        setError(errorMessage);
+        console.error('Error accepting match:', error);
+      }
+    });
+
+    // Apply optimistic update immediately
+    updateMatchStatus(matchId, 'active', optimisticData);
+
     try {
       const response = await matchAPI.acceptMatch(matchId);
-      updateMatchStatus(matchId, 'active', response.data);
+      optimisticUpdate.markSuccess(optimisticId, response.data);
       return response.data;
     } catch (err) {
-      console.error('Error accepting match:', err);
+      optimisticUpdate.markFailure(optimisticId, err);
       throw err;
     }
-  }, [updateMatchStatus]);
+  }, [updateMatchStatus, getMatchById, optimisticUpdate]);
 
   // Reject match
   const rejectMatch = useCallback(async (matchId) => {
+    const match = getMatchById(matchId);
+    if (!match) return;
+
+    // Optimistic update
+    const optimisticId = `reject_match_${matchId}`;
+    const optimisticData = { ...match, status: 'rejected', _isOptimistic: true };
+    
+    const rollbackFn = () => {
+      updateMatchStatus(matchId, match.status, match);
+    };
+
+    optimisticUpdate.createUpdate(optimisticId, optimisticData, rollbackFn, {
+      onSuccess: (result) => {
+        updateMatchStatus(matchId, 'rejected', result);
+      },
+      onError: (error) => {
+        const errorMessage = error.message || 'Failed to reject match';
+        setError(errorMessage);
+        console.error('Error rejecting match:', error);
+      }
+    });
+
+    // Apply optimistic update immediately
+    updateMatchStatus(matchId, 'rejected', optimisticData);
+
     try {
       const response = await matchAPI.rejectMatch(matchId);
-      updateMatchStatus(matchId, 'rejected', response.data);
+      optimisticUpdate.markSuccess(optimisticId, response.data);
       return response.data;
     } catch (err) {
-      console.error('Error rejecting match:', err);
+      optimisticUpdate.markFailure(optimisticId, err);
       throw err;
     }
-  }, [updateMatchStatus]);
+  }, [updateMatchStatus, getMatchById, optimisticUpdate]);
 
   // Delete match
   const deleteMatch = useCallback(async (matchId) => {
+    const match = getMatchById(matchId);
+    if (!match) return;
+
+    // Optimistic update
+    const optimisticId = `delete_match_${matchId}`;
+    
+    const rollbackFn = () => {
+      // Restore match to state
+      setMatches(prev => [...prev, match]);
+      categorizeMatches([...matches, match]);
+      
+      // Restore expiration timer if needed
+      if (match.expires_at) {
+        const expiresAt = new Date(match.expires_at);
+        const now = new Date();
+        const timeUntilExpiry = expiresAt.getTime() - now.getTime();
+        
+        if (timeUntilExpiry > 0) {
+          const timer = setTimeout(() => {
+            handleMatchExpired(matchId);
+          }, timeUntilExpiry);
+          
+          expirationTimers.current.set(matchId, timer);
+        }
+      }
+    };
+
+    optimisticUpdate.createUpdate(optimisticId, null, rollbackFn, {
+      onSuccess: () => {
+        // Clear expiration timer
+        if (expirationTimers.current.has(matchId)) {
+          clearTimeout(expirationTimers.current.get(matchId));
+          expirationTimers.current.delete(matchId);
+        }
+      },
+      onError: (error) => {
+        const errorMessage = error.message || 'Failed to delete match';
+        setError(errorMessage);
+        console.error('Error deleting match:', error);
+      }
+    });
+
+    // Apply optimistic update immediately
+    setMatches(prev => prev.filter(m => m.id !== matchId));
+    categorizeMatches(matches.filter(m => m.id !== matchId));
+
     try {
       await matchAPI.deleteMatch(matchId);
-      setMatches(prev => prev.filter(match => match.id !== matchId));
-      setPendingMatches(prev => prev.filter(match => match.id !== matchId));
-      setActiveMatches(prev => prev.filter(match => match.id !== matchId));
-      setExpiredMatches(prev => prev.filter(match => match.id !== matchId));
+      optimisticUpdate.markSuccess(optimisticId, null);
     } catch (err) {
-      console.error('Error deleting match:', err);
+      optimisticUpdate.markFailure(optimisticId, err);
       throw err;
     }
-  }, []);
+  }, [categorizeMatches, getMatchById, optimisticUpdate, matches, handleMatchExpired]);
 
   // Get matches by status
   const getMatchesByStatus = useCallback((status) => {
@@ -248,27 +354,35 @@ export const useMatches = () => {
     }
   }, [matches, pendingMatches, activeMatches, expiredMatches]);
 
-  // Calculate time until expiration
-  const getTimeUntilExpiry = useCallback((expiresAt) => {
-    if (!expiresAt) return null;
-    
-    const now = new Date();
-    const expiry = new Date(expiresAt);
-    const diff = expiry.getTime() - now.getTime();
-    
-    if (diff <= 0) return null;
-    
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    
-    return { hours, minutes, total: diff };
+  // Get match by ID
+  const getMatchById = useCallback((matchId) => {
+    return matches.find(match => match.id === matchId);
+  }, [matches]);
+
+  // Clear error
+  const clearError = useCallback(() => {
+    setError(null);
   }, []);
 
-  // Check if match is expiring soon (less than 1 hour)
-  const isExpiringSoon = useCallback((expiresAt) => {
-    const timeUntil = getTimeUntilExpiry(expiresAt);
-    return timeUntil && timeUntil.total < 60 * 60 * 1000; // Less than 1 hour
-  }, [getTimeUntilExpiry]);
+  // Set selected status
+  const setStatus = useCallback((status) => {
+    setSelectedStatus(status);
+  }, []);
+
+  // Get match statistics
+  const getMatchStats = useCallback(() => {
+    return {
+      total: matches.length,
+      pending: pendingMatches.length,
+      active: activeMatches.length,
+      expired: expiredMatches.length
+    };
+  }, [matches.length, pendingMatches.length, activeMatches.length, expiredMatches.length]);
+
+  // Load matches on mount
+  useEffect(() => {
+    fetchMatches();
+  }, [fetchMatches]);
 
   return {
     // State
@@ -280,17 +394,19 @@ export const useMatches = () => {
     error,
     selectedStatus,
     
-    // Actions
+    // Methods
     fetchMatches,
     acceptMatch,
     rejectMatch,
     deleteMatch,
-    setSelectedStatus,
-    
-    // Utilities
     getMatchesByStatus,
-    getTimeUntilExpiry,
-    isExpiringSoon,
-    updateMatchStatus,
+    getMatchById,
+    getMatchStats,
+    setStatus,
+    clearError,
+    
+    // Socket state
+    isConnected: socket.isConnected,
+    connectionState: socket.connectionState
   };
 }; 

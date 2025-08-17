@@ -180,4 +180,7 @@ const useCoinRewards = () => {
   };
 };
 
-export default useCoinRewards; 
+export default useCoinRewards;
+
+// Named export for consistency
+export { useCoinRewards }; 

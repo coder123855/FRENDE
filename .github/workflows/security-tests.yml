@@ -1,0 +1,219 @@
+name: Security Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'FRENDE/backend/tests/security/**'
+      - 'FRENDE/backend/core/security**'
+      - 'FRENDE/backend/api/**'
+      - '.github/workflows/security-tests.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'FRENDE/backend/tests/security/**'
+      - 'FRENDE/backend/core/security**'
+      - 'FRENDE/backend/api/**'
+      - '.github/workflows/security-tests.yml'
+  schedule:
+    - cron: '0 3 * * *'  # Run daily at 3 AM UTC
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_frende
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-security-${{ hashFiles('FRENDE/backend/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-security-
+          
+    - name: Install dependencies
+      working-directory: FRENDE/backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-test.txt
+        
+    - name: Run dependency vulnerability scan
+      working-directory: FRENDE/backend
+      run: |
+        safety check --json --output safety-report.json || true
+        pip-audit --format json --output pip-audit-report.json || true
+        
+    - name: Run static security analysis
+      working-directory: FRENDE/backend
+      run: |
+        bandit -r . -f json -o bandit-report.json || true
+        semgrep scan --config auto --json --output semgrep-report.json || true
+        
+    - name: Run security tests
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_frende
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET_KEY: test-secret-key
+        ENVIRONMENT: test
+      run: |
+        pytest tests/security/ -v --tb=short
+        
+    - name: Start backend server for security testing
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_frende
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET_KEY: test-secret-key
+        ENVIRONMENT: test
+      run: |
+        python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+        sleep 10
+        
+    - name: Run API security tests
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_frende
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET_KEY: test-secret-key
+        ENVIRONMENT: test
+        API_BASE_URL: http://localhost:8000
+      run: |
+        pytest tests/security/test_api_security.py -v --tb=short
+        
+    - name: Run input validation security tests
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_frende
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET_KEY: test-secret-key
+        ENVIRONMENT: test
+        API_BASE_URL: http://localhost:8000
+      run: |
+        pytest tests/security/test_input_validation_security.py -v --tb=short
+        
+    - name: Run authentication security tests
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_frende
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET_KEY: test-secret-key
+        ENVIRONMENT: test
+        API_BASE_URL: http://localhost:8000
+      run: |
+        pytest tests/security/test_authentication_security.py -v --tb=short
+        
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          FRENDE/backend/safety-report.json
+          FRENDE/backend/pip-audit-report.json
+          FRENDE/backend/bandit-report.json
+          FRENDE/backend/semgrep-report.json
+        retention-days: 90
+
+  security-analysis:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    needs: security-scan
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download security reports
+      uses: actions/download-artifact@v3
+      with:
+        name: security-reports
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install analysis dependencies
+      run: |
+        pip install pandas matplotlib seaborn
+        
+    - name: Generate security report
+      run: |
+        python scripts/ci/analyze-security.py
+        
+    - name: Upload security analysis
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-analysis
+        path: security-analysis.html
+        retention-days: 90
+        
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('security-analysis.html', 'utf8');
+          const summary = report.match(/<h2>Summary<\/h2>[\s\S]*?<h2>/)[0];
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## Security Test Results\n\n${summary}`
+          });
+
+  security-alerts:
+    name: Security Alerts
+    runs-on: ubuntu-latest
+    needs: security-analysis
+    if: always()
+    
+    steps:
+    - name: Download security analysis
+      uses: actions/download-artifact@v3
+      with:
+        name: security-analysis
+        
+    - name: Check for critical vulnerabilities
+      run: |
+        python scripts/ci/check-security-alerts.py
+        
+    # Slack notification removed due to secret configuration requirements
+    # To enable Slack notifications, configure SLACK_WEBHOOK_URL secret in repository settings

@@ -20,7 +20,7 @@ class ChatMessage(Base):
     # Message metadata
     is_read = Column(Boolean, default=False)
     is_system_message = Column(Boolean, default=False)  # For auto-generated messages
-    metadata = Column(JSON, nullable=True)
+    message_metadata = Column(JSON, nullable=True)
     
     # Task-related messages
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Clock, AlertTriangle } from 'lucide-react';
 import { Badge } from './ui/badge';
 

@@ -1,46 +1,42 @@
-import React, { useState } from 'react';
-import DefaultAvatar from './default-avatar';
+import * as React from "react"
+import * as AvatarPrimitive from "@radix-ui/react-avatar"
 
-const Avatar = ({ 
-  src, 
-  alt = "Profile picture", 
-  size = "md", 
-  className = "",
-  fallback = null,
-  name = null,
-  variant = "silhouette" // Pass through to DefaultAvatar
-}) => {
-  const [imageError, setImageError] = useState(false);
-  
-  const sizeClasses = {
-    xs: "w-6 h-6",
-    sm: "w-8 h-8", 
-    md: "w-12 h-12",
-    lg: "w-16 h-16",
-    xl: "w-20 h-20",
-    "2xl": "w-24 h-24",
-    "3xl": "w-32 h-32"
-  };
+import { cn } from "../../lib/utils"
 
-  const handleImageError = () => {
-    setImageError(true);
-  };
+const Avatar = React.forwardRef(({ className, ...props }, ref) => (
+  <AvatarPrimitive.Root
+    ref={ref}
+    className={cn(
+      "relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full",
+      className
+    )}
+    {...props}
+  />
+))
+Avatar.displayName = AvatarPrimitive.Root.displayName
 
-  // If no src or image failed to load, show default avatar
-  if (!src || imageError) {
-    return fallback || <DefaultAvatar size={size} name={name} variant={variant} className={className} />;
-  }
+const AvatarImage = React.forwardRef(({ className, ...props }, ref) => (
+  <AvatarPrimitive.Image
+    ref={ref}
+    className={cn("aspect-square h-full w-full", className)}
+    {...props}
+  />
+))
+AvatarImage.displayName = AvatarPrimitive.Image.displayName
 
-  return (
-    <div className={`relative inline-block ${className}`}>
-      <img
-        src={src}
-        alt={alt}
-        className={`${sizeClasses[size]} rounded-full object-cover border-2 border-white shadow-sm`}
-        onError={handleImageError}
-      />
-    </div>
-  );
-};
+const AvatarFallback = React.forwardRef(({ className, ...props }, ref) => (
+  <AvatarPrimitive.Fallback
+    ref={ref}
+    className={cn(
+      "flex h-full w-full items-center justify-center rounded-full bg-muted",
+      className
+    )}
+    {...props}
+  />
+))
+AvatarFallback.displayName = AvatarPrimitive.Fallback.displayName
 
-export default Avatar; 
+export { Avatar, AvatarImage, AvatarFallback }
+
+// Default export for backward compatibility
+export default Avatar 

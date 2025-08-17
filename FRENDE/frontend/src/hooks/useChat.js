@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import socketManager from '../lib/socket';
+import { useSocket } from './useSocket';
 import { useAuth } from './useAuth';
 import { useOfflineMessages, useOfflineState } from './useOffline.js';
+import { useOptimisticUpdate } from './useOptimisticUpdate';
 
 export const useChat = (matchId) => {
     const { user } = useAuth();
+    const socket = useSocket();
+    const optimisticUpdate = useOptimisticUpdate({ type: 'immediate' });
     const [messages, setMessages] = useState([]);
     const [typingUsers, setTypingUsers] = useState([]);
     const [onlineUsers, setOnlineUsers] = useState([]);
@@ -35,435 +38,389 @@ export const useChat = (matchId) => {
         if (!user || !matchId) return;
 
         // Only connect to socket if online
-        if (isOnline) {
-            // Connect to socket if not already connected
-            if (!socketManager.isConnected()) {
-                socketManager.connect(user.token);
-            }
-
+        if (isOnline && socket.isConnected) {
             // Join chat room
-            socketManager.joinChatRoom(matchId);
+            socket.joinChatRoom(matchId);
 
             // Set up event listeners
-            socketManager.on('new_message', handleNewMessage);
-            socketManager.on('typing_start', handleUserTyping);
-            socketManager.on('typing_stop', handleUserStoppedTyping);
-            socketManager.on('user_online', handleUserJoined);
-            socketManager.on('user_offline', handleUserLeft);
-            socketManager.on('online_users', handleOnlineUsers);
-            socketManager.on('messages_read', handleMessagesRead);
-            socketManager.on('task_submission', handleTaskSubmission);
-            socketManager.on('connection_established', handleConnectionEstablished);
-            socketManager.on('error', handleError);
-        }
+            const cleanupListeners = [
+                socket.on('new_message', handleNewMessage),
+                socket.on('typing_start', handleUserTyping),
+                socket.on('typing_stop', handleUserStoppedTyping),
+                socket.on('user_online', handleUserJoined),
+                socket.on('user_offline', handleUserLeft),
+                socket.on('online_users', handleOnlineUsers),
+                socket.on('messages_read', handleMessagesRead),
+                socket.on('task_submission', handleTaskSubmission),
+                socket.on('connection_established', handleConnectionEstablished),
+                socket.on('error', handleError)
+            ];
 
-        // Load chat history
-        loadChatHistory();
-        
-        // Load initial room status only if online
-        if (isOnline) {
+            // Load chat history
+            loadChatHistory();
+            
+            // Load initial room status
             loadRoomStatus();
-        }
 
-        return () => {
-            if (isOnline) {
+            return () => {
                 // Clean up event listeners
-                socketManager.off('new_message', handleNewMessage);
-                socketManager.off('typing_start', handleUserTyping);
-                socketManager.off('typing_stop', handleUserStoppedTyping);
-                socketManager.off('user_online', handleUserJoined);
-                socketManager.off('user_offline', handleUserLeft);
-                socketManager.off('online_users', handleOnlineUsers);
-                socketManager.off('messages_read', handleMessagesRead);
-                socketManager.off('task_submission', handleTaskSubmission);
-                socketManager.off('connection_established', handleConnectionEstablished);
-                socketManager.off('error', handleError);
-
+                cleanupListeners.forEach(cleanup => cleanup && cleanup());
+                
                 // Leave chat room
-                socketManager.leaveChatRoom(matchId);
-            }
-        };
-    }, [user, matchId, isOnline]);
-
-    // Load chat history from API with offline fallback
-    const loadChatHistory = useCallback(async () => {
-        if (!user || !matchId) return;
-
-        setIsLoading(true);
-        setError(null);
-
-        try {
-            if (isOnline) {
-                // Try online first
-                const response = await fetch(`/api/chat/${matchId}/history?page=1&limit=${size}`, {
-                    headers: {
-                        'Authorization': `Bearer ${user.token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    const messagesData = data.messages || [];
-                    setMessages(messagesData);
-                    setPage(data.page || 1);
-                    setHasMore(data.has_more);
-                    setNextCursor(data.next_cursor || null);
-                    setPrevCursor(data.prev_cursor || null);
-                    setIsOfflineMode(false);
-                    
-                    // Save messages to offline storage
-                    for (const message of messagesData) {
-                        await saveMessageOffline(message);
-                    }
-                } else {
-                    throw new Error('Failed to load chat history');
-                }
-            } else {
-                // Offline mode - use cached data
-                setMessages(offlineMessages);
-                setIsOfflineMode(true);
-                setError('You are offline. Showing cached messages.');
-            }
-        } catch (err) {
-            console.error('Error loading chat history:', err);
-            
-            // Fallback to offline data
-            if (hasOfflineMessages) {
-                setMessages(offlineMessages);
-                setIsOfflineMode(true);
-                setError('Network error. Showing cached messages.');
-            } else {
-                setError(err.message);
-            }
-        } finally {
-            setIsLoading(false);
+                socket.leaveChatRoom(matchId);
+            };
+        } else {
+            // Offline mode - load from offline storage
+            setIsOfflineMode(true);
+            loadOfflineMessages();
         }
-    }, [user, matchId, isOnline, offlineMessages, saveMessageOffline, hasOfflineMessages]);
+    }, [user, matchId, isOnline, socket.isConnected]);
 
-    const loadOlderMessages = useCallback(async () => {
-        if (!user || !matchId || !hasMore || isLoadingMore) return;
-        
-        setIsLoadingMore(true);
-        
-        try {
-            if (isOnline) {
-                const url = prevCursor
-                    ? `/api/chat/${matchId}/history/cursor?limit=${size}&cursor=${encodeURIComponent(prevCursor)}&direction=older`
-                    : `/api/chat/${matchId}/history?page=${page + 1}&limit=${size}`;
-                const response = await fetch(url, {
-                    headers: {
-                        'Authorization': `Bearer ${user.token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    const olderMessages = data.messages || [];
-                    setMessages(prev => [...olderMessages, ...prev]);
-                    setPage((p) => data.page ? data.page : p + 1);
-                    setHasMore(data.has_more);
-                    setNextCursor(data.next_cursor || null);
-                    setPrevCursor(data.prev_cursor || null);
-                    
-                    // Save older messages to offline storage
-                    for (const message of olderMessages) {
-                        await saveMessageOffline(message);
-                    }
-                }
-            } else {
-                // In offline mode, we can't load older messages
-                setError('Cannot load older messages while offline');
-            }
-        } catch (err) {
-            console.error('Error loading older messages:', err);
-            setError('Failed to load older messages');
-        } finally {
-            setIsLoadingMore(false);
-        }
-    }, [user, matchId, hasMore, isLoadingMore, size, page, prevCursor, isOnline, saveMessageOffline]);
+    // Update connection state when socket state changes
+    useEffect(() => {
+        setIsConnected(socket.isConnected);
+        setError(socket.lastError);
+    }, [socket.isConnected, socket.lastError]);
 
-    // Event handlers
+    // Handle new message
     const handleNewMessage = useCallback((data) => {
-        if (data.match_id === matchId) {
-            const newMessage = data.message;
-            setMessages(prev => [...prev, newMessage]);
-            
-            // Save to offline storage
+        if (!data || !data.message) return;
+
+        const newMessage = {
+            id: data.message_id || Date.now(),
+            sender_id: data.sender_id,
+            sender_name: data.sender_name,
+            message_text: data.message,
+            task_id: data.task_id,
+            timestamp: data.timestamp || new Date().toISOString(),
+            is_read: false
+        };
+
+        setMessages(prev => [...prev, newMessage]);
+        
+        // Save to offline storage
+        if (isOfflineMode) {
             saveMessageOffline(newMessage);
-            
-            // Mark message as read if it's from another user
-            if (newMessage.user_id !== user?.id) {
-                markMessagesAsRead([newMessage.id]);
-            }
         }
-    }, [matchId, user, saveMessageOffline]);
 
+        // Scroll to bottom
+        if (lastMessageRef.current) {
+            lastMessageRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [isOfflineMode, saveMessageOffline]);
+
+    // Handle user typing
     const handleUserTyping = useCallback((data) => {
-        if (data.user_id !== user?.id) {
-            setTypingUsers(prev => {
-                if (!prev.includes(data.user_id)) {
-                    return [...prev, data.user_id];
-                }
-                return prev;
-            });
-        }
-    }, [user]);
+        if (!data || !data.user_id) return;
 
-    const handleUserStoppedTyping = useCallback((data) => {
-        setTypingUsers(prev => prev.filter(id => id !== data.user_id));
-    }, []);
-
-    const handleUserJoined = useCallback((data) => {
-        setOnlineUsers(prev => {
-            if (!prev.includes(data.user_id)) return [...prev, data.user_id];
+        setTypingUsers(prev => {
+            if (!prev.includes(data.user_id)) {
+                return [...prev, data.user_id];
+            }
             return prev;
         });
     }, []);
 
+    // Handle user stopped typing
+    const handleUserStoppedTyping = useCallback((data) => {
+        if (!data || !data.user_id) return;
+
+        setTypingUsers(prev => prev.filter(id => id !== data.user_id));
+    }, []);
+
+    // Handle user joined
+    const handleUserJoined = useCallback((data) => {
+        if (!data || !data.user_id) return;
+
+        setOnlineUsers(prev => {
+            if (!prev.includes(data.user_id)) {
+                return [...prev, data.user_id];
+            }
+            return prev;
+        });
+    }, []);
+
+    // Handle user left
     const handleUserLeft = useCallback((data) => {
+        if (!data || !data.user_id) return;
+
         setOnlineUsers(prev => prev.filter(id => id !== data.user_id));
     }, []);
 
+    // Handle online users update
     const handleOnlineUsers = useCallback((data) => {
-        if (Array.isArray(data.users)) {
-            setOnlineUsers(data.users);
-        }
+        if (!data || !Array.isArray(data.users)) return;
+
+        setOnlineUsers(data.users);
     }, []);
 
-    const loadRoomStatus = useCallback(async () => {
-        if (!isOnline) return;
-        
-        try {
-            const resp = await fetch(`/api/chat/${matchId}/status`, {
-                headers: {
-                    'Authorization': `Bearer ${user.token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            if (resp.ok) {
-                const data = await resp.json();
-                setOnlineUsers(data.online_users || []);
-            }
-        } catch (e) {
-            console.error('Error loading room status', e);
-        }
-    }, [matchId, user, isOnline]);
-
+    // Handle messages read
     const handleMessagesRead = useCallback((data) => {
-        if (data.match_id === matchId) {
-            setMessages(prev => 
-                prev.map(msg => 
-                    data.message_ids.includes(msg.id) 
-                        ? { ...msg, is_read: true, read_at: new Date().toISOString() }
-                        : msg
-                )
-            );
-        }
-    }, [matchId]);
+        if (!data || !data.message_ids) return;
 
+        setMessages(prev => prev.map(msg => 
+            data.message_ids.includes(msg.id) 
+                ? { ...msg, is_read: true }
+                : msg
+        ));
+    }, []);
+
+    // Handle task submission
     const handleTaskSubmission = useCallback((data) => {
-        if (data.match_id === matchId) {
-            console.log('Task submission received:', data);
-            // Handle task submission notification
+        if (!data || !data.task_id) return;
+
+        // Handle task submission notification
+        console.log('Task submission received:', data);
+    }, []);
+
+    // Handle connection established
+    const handleConnectionEstablished = useCallback(() => {
+        console.log('Chat connection established');
+        setIsConnected(true);
+        setError(null);
+    }, []);
+
+    // Handle error
+    const handleError = useCallback((error) => {
+        console.error('Chat error:', error);
+        setError(error.message || 'Chat connection error');
+    }, []);
+
+    // Load chat history
+    const loadChatHistory = useCallback(async () => {
+        if (!matchId) return;
+
+        try {
+            setIsLoading(true);
+            setError(null);
+
+            // TODO: Implement API call to load chat history
+            // const response = await chatAPI.getChatHistory(matchId, page, size);
+            // setMessages(response.data.messages);
+            // setHasMore(response.data.has_more);
+            // setNextCursor(response.data.next_cursor);
+            // setPrevCursor(response.data.prev_cursor);
+
+            // For now, use mock data
+            setMessages([]);
+            setHasMore(false);
+        } catch (err) {
+            setError(err.message || 'Failed to load chat history');
+            console.error('Error loading chat history:', err);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [matchId, page, size]);
+
+    // Load older messages
+    const loadOlderMessages = useCallback(async () => {
+        if (!hasMore || isLoadingMore || !nextCursor) return;
+
+        try {
+            setIsLoadingMore(true);
+
+            // TODO: Implement API call to load older messages
+            // const response = await chatAPI.getChatHistory(matchId, page + 1, size, nextCursor);
+            // setMessages(prev => [...response.data.messages, ...prev]);
+            // setPage(prev => prev + 1);
+            // setHasMore(response.data.has_more);
+            // setNextCursor(response.data.next_cursor);
+
+            // For now, just set hasMore to false
+            setHasMore(false);
+        } catch (err) {
+            setError(err.message || 'Failed to load older messages');
+            console.error('Error loading older messages:', err);
+        } finally {
+            setIsLoadingMore(false);
+        }
+    }, [matchId, hasMore, isLoadingMore, nextCursor, page, size]);
+
+    // Load room status
+    const loadRoomStatus = useCallback(async () => {
+        if (!matchId) return;
+
+        try {
+            // TODO: Implement API call to load room status
+            // const response = await chatAPI.getRoomStatus(matchId);
+            // setOnlineUsers(response.data.online_users);
+            // setTypingUsers(response.data.typing_users);
+
+            // For now, use empty arrays
+            setOnlineUsers([]);
+            setTypingUsers([]);
+        } catch (err) {
+            console.error('Error loading room status:', err);
         }
     }, [matchId]);
 
-    const handleConnectionEstablished = useCallback(() => {
-        setIsConnected(true);
-    }, []);
+    // Load offline messages
+    const loadOfflineMessages = useCallback(async () => {
+        if (!hasOfflineMessages) {
+            setMessages([]);
+            return;
+        }
 
-    const handleError = useCallback((data) => {
-        setError(data.message);
-        console.error('Chat error:', data);
-    }, []);
+        try {
+            const offlineMsgs = await refreshOfflineMessages();
+            setMessages(offlineMsgs);
+        } catch (err) {
+            console.error('Error loading offline messages:', err);
+            setMessages([]);
+        }
+    }, [hasOfflineMessages, refreshOfflineMessages]);
 
-    // Chat actions with offline support
-    const sendMessage = useCallback(async (messageText, messageType = 'text') => {
-        if (!messageText.trim()) return;
+    // Send message
+    const sendMessage = useCallback(async (message, type = 'text', taskId = null) => {
+        if (!message.trim() || !matchId) return;
 
-        // Create message object
-        const message = {
-            id: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        const messageData = {
             match_id: matchId,
-            user_id: user?.id,
-            message_text: messageText,
-            message_type: messageType,
-            timestamp: new Date().toISOString(),
-            is_read: false,
-            isOffline: !isOnline
+            message: message.trim(),
+            type,
+            task_id: taskId
         };
 
-        try {
-            if (isOnline && isConnected) {
-                // Send via WebSocket for real-time
-                socketManager.sendMessage(matchId, messageText, messageType);
+        // Create optimistic message
+        const optimisticMessage = {
+            id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            sender_id: user?.id,
+            sender_name: user?.name || user?.username,
+            message_text: message.trim(),
+            task_id: taskId,
+            timestamp: new Date().toISOString(),
+            is_read: false,
+            _isOptimistic: true
+        };
 
-                // Also send via REST API for persistence
-                const response = await fetch(`/api/chat/${matchId}/messages`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${user.token}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        message_text: messageText,
-                        message_type: messageType
-                    })
-                });
+        // Optimistic update
+        const optimisticId = `send_message_${optimisticMessage.id}`;
+        
+        const rollbackFn = () => {
+            setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
+        };
 
-                if (response.ok) {
-                    const serverMessage = await response.json();
-                    // Update with server response
-                    message.id = serverMessage.id;
-                    message.isOffline = false;
-                } else {
-                    throw new Error('Failed to send message');
-                }
-            } else {
-                // Offline mode - save to offline storage
-                message.isOffline = true;
-                setError('Message saved offline. Will send when connected.');
+        optimisticUpdate.createUpdate(optimisticId, optimisticMessage, rollbackFn, {
+            onSuccess: (result) => {
+                // Replace optimistic message with real message
+                setMessages(prev => prev.map(msg => 
+                    msg.id === optimisticMessage.id ? { ...result, _isOptimistic: false } : msg
+                ));
+            },
+            onError: (error) => {
+                setError(error.message || 'Failed to send message');
+                console.error('Error sending message:', error);
             }
+        });
 
-            // Save to offline storage
-            await saveMessageOffline(message);
-            
-            // Add to local state
-            setMessages(prev => [...prev, message]);
-
-        } catch (err) {
-            console.error('Error sending message:', err);
-            
-            // If online failed, save as offline
-            if (isOnline) {
-                try {
-                    message.isOffline = true;
-                    await saveMessageOffline(message);
-                    setMessages(prev => [...prev, message]);
-                    setError('Message saved offline. Will send when connected.');
-                } catch (offlineErr) {
-                    console.error('Failed to save message offline:', offlineErr);
-                    setError('Failed to send message');
-                }
-            } else {
-                setError('Failed to send message');
-            }
-        }
-    }, [matchId, user, isConnected, isOnline, saveMessageOffline]);
-
-    const startTyping = useCallback(() => {
-        if (isConnected && isOnline) {
-            socketManager.startTyping(matchId);
-        }
-    }, [matchId, isConnected, isOnline]);
-
-    const stopTyping = useCallback(() => {
-        if (isConnected && isOnline) {
-            socketManager.stopTyping(matchId);
-        }
-    }, [matchId, isConnected, isOnline]);
-
-    const markMessagesAsRead = useCallback(async (messageIds) => {
-        if (!messageIds.length) return;
+        // Add optimistic message immediately
+        setMessages(prev => [...prev, optimisticMessage]);
 
         try {
-            if (isOnline && isConnected) {
-                // Mark via WebSocket for real-time
-                socketManager.markMessagesAsRead(matchId, messageIds);
+            if (isOnline && socket.isConnected) {
+                // Send via socket
+                socket.sendMessage(matchId, message.trim(), type);
+                optimisticUpdate.markSuccess(optimisticId, optimisticMessage);
+            } else {
+                // Save to offline storage
+                const offlineMessage = {
+                    id: Date.now(),
+                    sender_id: user?.id,
+                    sender_name: user?.name || user?.username,
+                    message_text: message.trim(),
+                    task_id: taskId,
+                    timestamp: new Date().toISOString(),
+                    is_read: false
+                };
 
-                // Also mark via REST API for persistence
-                await fetch(`/api/chat/${matchId}/messages/read`, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `Bearer ${user.token}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        message_ids: messageIds
-                    })
-                });
+                await saveMessageOffline(offlineMessage);
+                setMessages(prev => [...prev, offlineMessage]);
             }
 
-            // Update local state
-            setMessages(prev => 
-                prev.map(msg => 
-                    messageIds.includes(msg.id) 
-                        ? { ...msg, is_read: true, read_at: new Date().toISOString() }
-                        : msg
-                )
-            );
-
-            // Update offline storage
-            for (const messageId of messageIds) {
-                const message = messages.find(m => m.id === messageId);
-                if (message) {
-                    await saveMessageOffline({
-                        ...message,
-                        is_read: true,
-                        read_at: new Date().toISOString()
-                    });
-                }
-            }
-        } catch (err) {
-            console.error('Error marking messages as read:', err);
-        }
-    }, [matchId, user, isConnected, isOnline, messages, saveMessageOffline]);
-
-    const submitTaskCompletion = useCallback((taskId, submissionData) => {
-        if (isConnected && isOnline) {
-            socketManager.submitTaskCompletion(matchId, taskId, submissionData);
-        }
-    }, [matchId, isConnected, isOnline]);
-
-    // Typing indicator with debounce
-    const handleTyping = useCallback(() => {
-        startTyping();
-
-        // Clear existing timeout
-        if (typingTimeoutRef.current) {
-            clearTimeout(typingTimeoutRef.current);
-        }
-
-        // Set new timeout to stop typing
-        typingTimeoutRef.current = setTimeout(() => {
-            stopTyping();
-        }, 2000);
-    }, [startTyping, stopTyping]);
-
-    // Clean up typing timeout on unmount
-    useEffect(() => {
-        return () => {
+            // Clear typing indicator
             if (typingTimeoutRef.current) {
                 clearTimeout(typingTimeoutRef.current);
             }
-        };
+        } catch (err) {
+            setError(err.message || 'Failed to send message');
+            console.error('Error sending message:', err);
+        }
+    }, [matchId, user, isOnline, socket.isConnected, saveMessageOffline]);
+
+    // Handle typing
+    const handleTyping = useCallback((isTyping) => {
+        if (!matchId || !socket.isConnected) return;
+
+        if (isTyping) {
+            socket.startTyping(matchId);
+        } else {
+            if (typingTimeoutRef.current) {
+                clearTimeout(typingTimeoutRef.current);
+            }
+            typingTimeoutRef.current = setTimeout(() => {
+                socket.stopTyping(matchId);
+            }, 1000);
+        }
+    }, [matchId, socket.isConnected, socket.startTyping, socket.stopTyping]);
+
+    // Mark messages as read
+    const markMessagesAsRead = useCallback(async (messageIds) => {
+        if (!messageIds || messageIds.length === 0) return;
+
+        try {
+            if (isOnline && socket.isConnected) {
+                socket.markMessagesAsRead(matchId, messageIds);
+            }
+
+            // Update local state
+            setMessages(prev => prev.map(msg => 
+                messageIds.includes(msg.id) 
+                    ? { ...msg, is_read: true }
+                    : msg
+            ));
+        } catch (err) {
+            console.error('Error marking messages as read:', err);
+        }
+    }, [matchId, isOnline, socket.isConnected, socket.markMessagesAsRead]);
+
+    // Submit task completion
+    const submitTaskCompletion = useCallback(async (taskId, submissionData) => {
+        if (!taskId || !matchId) return;
+
+        try {
+            if (isOnline && socket.isConnected) {
+                socket.submitTaskCompletion(matchId, taskId, submissionData);
+            }
+        } catch (err) {
+            setError(err.message || 'Failed to submit task completion');
+            console.error('Error submitting task completion:', err);
+        }
+    }, [matchId, isOnline, socket.isConnected, socket.submitTaskCompletion]);
+
+    // Clear error
+    const clearError = useCallback(() => {
+        setError(null);
     }, []);
 
-    // Scroll to bottom when new messages arrive
-    useEffect(() => {
-        if (lastMessageRef.current) {
-            lastMessageRef.current.scrollIntoView({ behavior: 'smooth' });
-        }
-    }, [messages]);
-
     return {
+        // State
         messages,
         typingUsers,
+        onlineUsers,
         isConnected,
         isLoading,
         error,
         isOfflineMode,
+        hasMore,
+        isLoadingMore,
+        lastMessageRef,
+
+        // Methods
         sendMessage,
-        startTyping,
-        stopTyping,
+        handleTyping,
         markMessagesAsRead,
         submitTaskCompletion,
-        handleTyping,
-        lastMessageRef,
-        reloadHistory: loadChatHistory,
         loadOlderMessages,
-        hasMore,
-        isLoadingMore
+        clearError
     };
 }; 

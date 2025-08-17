@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { userAPI } from '../lib/api';
+import { useOptimisticUpdate } from './useOptimisticUpdate';
 
 const useCompatibleUsers = (limit = 10) => {
+  const optimisticUpdate = useOptimisticUpdate({ type: 'immediate' });
   const [compatibleUsers, setCompatibleUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -55,8 +57,27 @@ const useCompatibleUsers = (limit = 10) => {
 
   // Remove user from list after sending request
   const removeUser = useCallback((userId) => {
-    setCompatibleUsers(prev => prev.filter(user => user.user.id !== userId));
-  }, []);
+    const user = getUserById(userId);
+    if (!user) return;
+
+    // Optimistic update
+    const optimisticId = `remove_user_${userId}`;
+    
+    const rollbackFn = () => {
+      setCompatibleUsers(prev => [...prev, user]);
+    };
+
+    optimisticUpdate.createUpdate(optimisticId, null, rollbackFn, {
+      onError: (error) => {
+        console.error('Error removing user:', error);
+        // Restore user on error
+        setCompatibleUsers(prev => [...prev, user]);
+      }
+    });
+
+    // Apply optimistic update immediately
+    setCompatibleUsers(prev => prev.filter(u => u.user.id !== userId));
+  }, [getUserById, optimisticUpdate]);
 
   // Get user by ID
   const getUserById = useCallback((userId) => {

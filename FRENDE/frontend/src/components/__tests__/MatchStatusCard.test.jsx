@@ -1,5 +1,47 @@
+import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import MatchStatusCard from '../MatchStatusCard';
+
+// Mock UI components
+jest.mock('../ui/card', () => ({
+  Card: ({ children, className }) => <div className={className}>{children}</div>,
+  CardContent: ({ children }) => <div>{children}</div>,
+  CardHeader: ({ children }) => <div>{children}</div>,
+  CardTitle: ({ children, className }) => <h3 className={className}>{children}</h3>
+}));
+
+jest.mock('../ui/button', () => ({
+  Button: ({ children, onClick, className, variant, size, disabled }) => (
+    <button onClick={onClick} className={className} data-variant={variant} data-size={size} disabled={disabled}>
+      {children}
+    </button>
+  )
+}));
+
+jest.mock('../ui/avatar', () => ({
+  Avatar: ({ children, className }) => <div className={className}>{children}</div>,
+  AvatarImage: ({ src }) => <img src={src} alt="avatar" />,
+  AvatarFallback: ({ children }) => <div>{children}</div>
+}));
+
+jest.mock('../ui/badge', () => ({
+  Badge: ({ children, variant, className }) => (
+    <span className={className} data-variant={variant}>
+      {children}
+    </span>
+  )
+}));
+
+// Mock lucide-react icons
+jest.mock('lucide-react', () => ({
+  CheckCircle: () => <span>✓</span>,
+  XCircle: () => <span>✗</span>,
+  Trash2: () => <span>🗑</span>,
+  MessageCircle: () => <span>💬</span>,
+  Heart: () => <span>❤</span>,
+  Clock: () => <span>⏰</span>,
+  AlertTriangle: () => <span>⚠</span>
+}));
 
 // Mock the ExpirationTimer component
 jest.mock('../ExpirationTimer', () => {

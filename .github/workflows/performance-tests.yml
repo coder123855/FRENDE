@@ -1,0 +1,219 @@
+name: Performance Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'FRENDE/backend/tests/performance/**'
+      - 'FRENDE/backend/tests/load/**'
+      - 'FRENDE/frontend/tests/load/**'
+      - '.github/workflows/performance-tests.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'FRENDE/backend/tests/performance/**'
+      - 'FRENDE/backend/tests/load/**'
+      - 'FRENDE/frontend/tests/load/**'
+      - '.github/workflows/performance-tests.yml'
+  schedule:
+    - cron: '0 2 * * *'  # Run daily at 2 AM UTC
+
+jobs:
+  backend-performance:
+    name: Backend Performance Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_frende
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-performance-${{ hashFiles('FRENDE/backend/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-performance-
+          
+    - name: Install dependencies
+      working-directory: FRENDE/backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-test.txt
+        
+    - name: Start backend server
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_frende
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET_KEY: test-secret-key
+        ENVIRONMENT: test
+      run: |
+        python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+        sleep 10
+        
+    - name: Run performance tests
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_frende
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET_KEY: test-secret-key
+        ENVIRONMENT: test
+        API_BASE_URL: http://localhost:8000
+      run: |
+        pytest tests/performance/ -v --benchmark-only --benchmark-skip --benchmark-min-rounds=5
+        
+    - name: Run load tests
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_frende
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET_KEY: test-secret-key
+        ENVIRONMENT: test
+        API_BASE_URL: http://localhost:8000
+      run: |
+        python tests/load/load_test.py --scenario "Peak Hour Simulation" --duration 60 --users 10
+        
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: backend-performance-results
+        path: |
+          FRENDE/backend/.pytest_cache/
+          FRENDE/backend/load_test_results/
+        retention-days: 30
+
+  frontend-performance:
+    name: Frontend Performance Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        cache-dependency-path: FRENDE/frontend/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: FRENDE/frontend
+      run: npm ci
+      
+    - name: Build application
+      working-directory: FRENDE/frontend
+      run: npm run build
+      
+    - name: Start development server
+      working-directory: FRENDE/frontend
+      run: |
+        npm run preview &
+        sleep 10
+        
+    - name: Run frontend performance tests
+      working-directory: FRENDE/frontend
+      run: |
+        npm run test:performance:ci
+        
+    - name: Run frontend load tests
+      working-directory: FRENDE/frontend
+      run: |
+        node tests/load/frontend_load_test.js --scenario "Mixed Workload" --duration 60 --users 5
+        
+    - name: Upload frontend performance results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: frontend-performance-results
+        path: |
+          FRENDE/frontend/performance-results/
+          FRENDE/frontend/load-test-results/
+        retention-days: 30
+
+  performance-analysis:
+    name: Performance Analysis
+    runs-on: ubuntu-latest
+    needs: [backend-performance, frontend-performance]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download backend results
+      uses: actions/download-artifact@v3
+      with:
+        name: backend-performance-results
+        
+    - name: Download frontend results
+      uses: actions/download-artifact@v3
+      with:
+        name: frontend-performance-results
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install analysis dependencies
+      run: |
+        pip install matplotlib seaborn pandas numpy
+        
+    - name: Generate performance report
+      run: |
+        python scripts/ci/analyze-performance.py
+        
+    - name: Upload performance report
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report
+        path: performance-report.html
+        retention-days: 90
+        
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('performance-report.html', 'utf8');
+          const summary = report.match(/<h2>Summary<\/h2>[\s\S]*?<h2>/)[0];
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## Performance Test Results\n\n${summary}`
+          });

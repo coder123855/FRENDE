@@ -3,6 +3,7 @@ import logging
 from typing import List, Optional
 from pydantic import Field, validator
 from pydantic_settings import BaseSettings
+from .secrets_manager import secrets_manager
 
 class Settings(BaseSettings):
     # =============================================================================
@@ -33,6 +34,10 @@ class Settings(BaseSettings):
     )
     JWT_ALGORITHM: str = Field(default="HS256", description="JWT algorithm")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=1440, description="Access token expiration in minutes")
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30, description="Refresh token expiration in days")
+    TOKEN_ROTATION_ENABLED: bool = Field(default=True, description="Enable automatic token rotation")
+    MAX_ACTIVE_SESSIONS: int = Field(default=5, description="Maximum active sessions per user")
+    TOKEN_FINGERPRINT_ENABLED: bool = Field(default=True, description="Enable token fingerprinting for security")
     BCRYPT_ROUNDS: int = Field(default=12, description="BCrypt rounds for password hashing")
     
     # CORS Configuration
@@ -164,6 +169,14 @@ class Settings(BaseSettings):
     COINS_PER_SLOT: int = Field(default=50, description="Coins required to purchase a slot")
     
     # =============================================================================
+    # SECRETS MANAGEMENT CONFIGURATION
+    # =============================================================================
+    SECRETS_MANAGER_ENABLED: bool = Field(default=True, description="Enable secrets manager")
+    SECRETS_MASTER_KEY: Optional[str] = Field(default=None, description="Master key for secrets encryption")
+    SECRETS_BACKUP_ENABLED: bool = Field(default=True, description="Enable automatic secrets backup")
+    SECRETS_ROTATION_ENABLED: bool = Field(default=True, description="Enable automatic secrets rotation")
+    
+    # =============================================================================
     # VALIDATORS
     # =============================================================================
     @validator("ENVIRONMENT")
@@ -275,6 +288,23 @@ class Settings(BaseSettings):
                         return v
                     except ValueError:
                         raise ValueError(f"Invalid request size format: {v}")
+        return v
+    
+    @validator("DATABASE_URL")
+    def validate_database_url(cls, v):
+        """Validate database URL and check for production requirements"""
+        if os.getenv("ENVIRONMENT") == "production":
+            if v.startswith("sqlite"):
+                raise ValueError("SQLite is not allowed in production. Use PostgreSQL.")
+            if not v.startswith("postgresql"):
+                raise ValueError("Production must use PostgreSQL database")
+        return v
+    
+    @validator("GEMINI_API_KEY")
+    def validate_gemini_api_key(cls, v):
+        """Validate Gemini API key"""
+        if v and v.startswith("your-"):
+            raise ValueError("GEMINI_API_KEY must be a valid API key, not a placeholder")
         return v
     
     # =============================================================================
@@ -430,6 +460,29 @@ class Settings(BaseSettings):
                     except ValueError:
                         return 10 * 1024**2  # Default to 10MB
         return 10 * 1024**2  # Default to 10MB
+    
+    def get_secret(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Get a secret from the secrets manager or environment variable"""
+        if self.SECRETS_MANAGER_ENABLED:
+            # Try secrets manager first
+            secret = secrets_manager.get_secret(key)
+            if secret:
+                return secret
+        
+        # Fallback to environment variable
+        return os.getenv(key, default)
+    
+    def store_secret(self, key: str, value: str, metadata: Optional[dict] = None) -> bool:
+        """Store a secret in the secrets manager"""
+        if self.SECRETS_MANAGER_ENABLED:
+            return secrets_manager.store_secret(key, value, metadata)
+        return False
+    
+    def rotate_secret(self, key: str, new_value: str) -> bool:
+        """Rotate a secret in the secrets manager"""
+        if self.SECRETS_MANAGER_ENABLED and self.SECRETS_ROTATION_ENABLED:
+            return secrets_manager.rotate_secret(key, new_value)
+        return False
 
 # Create settings instance
 settings = Settings()

@@ -96,12 +96,16 @@ Thank you for your interest in contributing to Frende! This document provides gu
 - Use pytest for testing
 - Aim for at least 80% code coverage
 - Test both success and error cases
+- Run `pytest --cov=.` to check coverage locally
+- Coverage reports are generated in `htmlcov/` directory
 
 #### Frontend Testing
 - Write tests for all React components
 - Use Jest and React Testing Library
 - Test user interactions and component behavior
 - Mock external dependencies
+- Maintain 80%+ test coverage
+- Run `npm run test:coverage` to check coverage locally
 
 ### Documentation
 

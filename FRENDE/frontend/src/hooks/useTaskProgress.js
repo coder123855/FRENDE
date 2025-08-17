@@ -277,4 +277,7 @@ const useTaskProgress = (taskId, matchId) => {
   };
 };
 
-export default useTaskProgress; 
+export default useTaskProgress;
+
+// Named export for consistency
+export { useTaskProgress }; 

@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 import os
+import ssl
 from core.config import settings
 
 # Database URL - use environment variable or default to SQLite for development
@@ -20,13 +21,36 @@ if DATABASE_URL.startswith("sqlite"):
         echo=True  # Enable SQL logging for development
     )
 else:
-    # PostgreSQL configuration for production
+    # PostgreSQL configuration for production with SSL/TLS
     async_database_url = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+    
+    # SSL configuration for production
+    ssl_context = None
+    if settings.is_production():
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+    
     engine = create_async_engine(
         async_database_url,
         pool_pre_ping=True,
         pool_recycle=300,
-        echo=False  # Disable SQL logging for production
+        pool_size=settings.DATABASE_POOL_SIZE,
+        max_overflow=settings.DATABASE_MAX_OVERFLOW,
+        pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+        echo=False,  # Disable SQL logging for production
+        connect_args={
+            "ssl": ssl_context,
+            "server_settings": {
+                "application_name": "frende_backend",
+                "timezone": "UTC"
+            }
+        } if ssl_context else {
+            "server_settings": {
+                "application_name": "frende_backend",
+                "timezone": "UTC"
+            }
+        }
     )
 
 # Create async SessionLocal class
@@ -62,4 +86,35 @@ def get_db():
     try:
         yield db
     finally:
-        db.close() 
+        db.close()
+
+# Database health check function
+async def check_database_health() -> dict:
+    """Check database connectivity and health"""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Test basic connectivity
+            result = await session.execute("SELECT 1")
+            await result.fetchone()
+            
+            # Test connection pool status
+            pool = engine.pool
+            pool_status = {
+                "size": pool.size(),
+                "checked_in": pool.checkedin(),
+                "checked_out": pool.checkedout(),
+                "overflow": pool.overflow(),
+                "invalid": pool.invalid()
+            }
+            
+            return {
+                "status": "healthy",
+                "pool_status": pool_status,
+                "ssl_enabled": settings.is_production()
+            }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "ssl_enabled": settings.is_production()
+        } 

@@ -1,210 +1,137 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDownIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import * as React from "react"
+import * as SelectPrimitive from "@radix-ui/react-select"
+import { Check, ChevronDown, ChevronUp } from "lucide-react"
 
-const Select = ({
-  options = [],
-  value = '',
-  onChange,
-  placeholder = 'Select an option...',
-  disabled = false,
-  allowCustom = false,
-  customPlaceholder = 'Type custom value...',
-  className = '',
-  error = null,
-  loading = false
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [customValue, setCustomValue] = useState('');
-  const [showCustomInput, setShowCustomInput] = useState(false);
-  const dropdownRef = useRef(null);
-  const inputRef = useRef(null);
+import { cn } from "../../lib/utils"
 
-  // Filter options based on search term
-  const filteredOptions = options.filter(option =>
-    option.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+const Select = SelectPrimitive.Root
 
-  // Handle click outside to close dropdown
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-        setSearchTerm('');
-        setShowCustomInput(false);
-      }
-    };
+const SelectGroup = SelectPrimitive.Group
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+const SelectValue = SelectPrimitive.Value
 
-  // Handle keyboard navigation
-  const handleKeyDown = (e) => {
-    if (e.key === 'Escape') {
-      setIsOpen(false);
-      setSearchTerm('');
-      setShowCustomInput(false);
-    }
-  };
+const SelectTrigger = React.forwardRef(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      className
+    )}
+    {...props}
+  >
+    {children}
+    <SelectPrimitive.Icon asChild>
+      <ChevronDown className="h-4 w-4 opacity-50" />
+    </SelectPrimitive.Icon>
+  </SelectPrimitive.Trigger>
+))
+SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
 
-  const handleOptionClick = (option) => {
-    onChange(option);
-    setIsOpen(false);
-    setSearchTerm('');
-    setShowCustomInput(false);
-  };
+const SelectScrollUpButton = React.forwardRef(({ className, ...props }, ref) => (
+  <SelectPrimitive.ScrollUpButton
+    ref={ref}
+    className={cn(
+      "flex cursor-default items-center justify-center py-1",
+      className
+    )}
+    {...props}
+  >
+    <ChevronUp className="h-4 w-4" />
+  </SelectPrimitive.ScrollUpButton>
+))
+SelectScrollUpButton.displayName = SelectPrimitive.ScrollUpButton.displayName
 
-  const handleCustomSubmit = () => {
-    if (customValue.trim()) {
-      onChange(customValue.trim());
-      setIsOpen(false);
-      setSearchTerm('');
-      setCustomValue('');
-      setShowCustomInput(false);
-    }
-  };
+const SelectScrollDownButton = React.forwardRef(({ className, ...props }, ref) => (
+  <SelectPrimitive.ScrollDownButton
+    ref={ref}
+    className={cn(
+      "flex cursor-default items-center justify-center py-1",
+      className
+    )}
+    {...props}
+  >
+    <ChevronDown className="h-4 w-4" />
+  </SelectPrimitive.ScrollDownButton>
+))
+SelectScrollDownButton.displayName =
+  SelectPrimitive.ScrollDownButton.displayName
 
-  const handleCustomKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      handleCustomSubmit();
-    } else if (e.key === 'Escape') {
-      setShowCustomInput(false);
-      setCustomValue('');
-    }
-  };
-
-  const clearSelection = () => {
-    onChange('');
-    setSearchTerm('');
-  };
-
-  const displayValue = value || '';
-
-  return (
-    <div className={`relative ${className}`} ref={dropdownRef}>
-      {/* Main Select Button */}
-              <div
-          className={`
-            relative w-full px-3 py-2 text-left border rounded-md shadow-sm cursor-pointer
-            ${disabled || loading ? 'bg-gray-100 cursor-not-allowed' : 'bg-white hover:bg-gray-50'}
-            ${error ? 'border-red-300 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}
-            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50
-          `}
-          onClick={() => !disabled && !loading && setIsOpen(!isOpen)}
-          onKeyDown={handleKeyDown}
-          tabIndex={disabled || loading ? -1 : 0}
-        >
-                  <span className={`block truncate ${!displayValue ? 'text-gray-500' : 'text-gray-900'}`}>
-            {loading ? 'Loading...' : (displayValue || placeholder)}
-          </span>
-        
-        <span className="absolute inset-y-0 right-0 flex items-center pr-2">
-          {value && (
-            <button
-              type="button"
-              className="text-gray-400 hover:text-gray-600 mr-1"
-              onClick={(e) => {
-                e.stopPropagation();
-                clearSelection();
-              }}
-            >
-              <XMarkIcon className="h-4 w-4" />
-            </button>
-          )}
-          <ChevronDownIcon 
-            className={`h-4 w-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} 
-          />
-        </span>
-      </div>
-
-      {/* Dropdown Menu */}
-      {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
-          {/* Search Input */}
-          <div className="p-2 border-b border-gray-200">
-            <input
-              ref={inputRef}
-              type="text"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Search options..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={handleKeyDown}
-            />
-          </div>
-
-          {/* Options List */}
-          <div className="py-1">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((option, index) => (
-                <div
-                  key={index}
-                  className="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-900"
-                  onClick={() => handleOptionClick(option)}
-                >
-                  {option}
-                </div>
-              ))
-            ) : searchTerm && (
-              <div className="px-3 py-2 text-sm text-gray-500">
-                No options found
-              </div>
-            )}
-
-            {/* Custom Option */}
-            {allowCustom && searchTerm && !filteredOptions.includes(searchTerm) && (
-              <div
-                className="px-3 py-2 text-sm cursor-pointer hover:bg-green-50 hover:text-green-900 border-t border-gray-200"
-                onClick={() => setShowCustomInput(true)}
-              >
-                Add "{searchTerm}" as custom option
-              </div>
-            )}
-
-            {/* Custom Input */}
-            {showCustomInput && (
-              <div className="p-2 border-t border-gray-200">
-                <input
-                  type="text"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder={customPlaceholder}
-                  value={customValue}
-                  onChange={(e) => setCustomValue(e.target.value)}
-                  onKeyDown={handleCustomKeyDown}
-                  autoFocus
-                />
-                <div className="flex gap-2 mt-2">
-                  <button
-                    type="button"
-                    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                    onClick={handleCustomSubmit}
-                  >
-                    Add
-                  </button>
-                  <button
-                    type="button"
-                    className="px-3 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
-                    onClick={() => {
-                      setShowCustomInput(false);
-                      setCustomValue('');
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+const SelectContent = React.forwardRef(({ className, children, position = "popper", ...props }, ref) => (
+  <SelectPrimitive.Portal>
+    <SelectPrimitive.Content
+      ref={ref}
+      className={cn(
+        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        position === "popper" &&
+          "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+        className
       )}
+      position={position}
+      {...props}
+    >
+      <SelectScrollUpButton />
+      <SelectPrimitive.Viewport
+        className={cn(
+          "p-1",
+          position === "popper" &&
+            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+        )}
+      >
+        {children}
+      </SelectPrimitive.Viewport>
+      <SelectScrollDownButton />
+    </SelectPrimitive.Content>
+  </SelectPrimitive.Portal>
+))
+SelectContent.displayName = SelectPrimitive.Content.displayName
 
-      {/* Error Message */}
-      {error && (
-        <p className="mt-1 text-sm text-red-600">{error}</p>
-      )}
-    </div>
-  );
-};
+const SelectLabel = React.forwardRef(({ className, ...props }, ref) => (
+  <SelectPrimitive.Label
+    ref={ref}
+    className={cn("py-1.5 pl-8 pr-2 text-sm font-semibold", className)}
+    {...props}
+  />
+))
+SelectLabel.displayName = SelectPrimitive.Label.displayName
 
-export default Select; 
+const SelectItem = React.forwardRef(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
+
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+  </SelectPrimitive.Item>
+))
+SelectItem.displayName = SelectPrimitive.Item.displayName
+
+const SelectSeparator = React.forwardRef(({ className, ...props }, ref) => (
+  <SelectPrimitive.Separator
+    ref={ref}
+    className={cn("-mx-1 my-1 h-px bg-muted", className)}
+    {...props}
+  />
+))
+SelectSeparator.displayName = SelectPrimitive.Separator.displayName
+
+export {
+  Select,
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectLabel,
+  SelectItem,
+  SelectSeparator,
+  SelectScrollUpButton,
+  SelectScrollDownButton,
+} 

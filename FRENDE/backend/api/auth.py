@@ -1,20 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from core.auth import fastapi_users, current_active_user, auth_backend
 from core.database import get_async_session
-from core.security import verify_password, get_password_hash
+from core.security import verify_password
+from core.auth import current_active_user
 from models.user import User
 from schemas.user import (
-    UserCreate, UserUpdate, UserRead, LoginRequest, 
-    TokenResponse, PasswordChangeRequest
+    UserCreate, UserRead, LoginRequest, TokenResponse, 
+    RefreshTokenRequest, RefreshTokenResponse, LogoutRequest,
+    UserSessionsResponse, PasswordChangeRequest
 )
+from services.token_service import TokenService
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
-
-# Include FastAPI Users routes
-router.include_router(fastapi_users.get_auth_router(auth_backend), prefix="/jwt")
 
 # Custom registration endpoint
 @router.post("/register", response_model=UserRead)
@@ -22,9 +21,10 @@ async def register(
     user_create: UserCreate,
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Register a new user with custom fields."""
-    # Check if email already exists
-    from sqlalchemy import select
+    """Register a new user."""
+    from core.security import get_password_hash
+    
+    # Check if user already exists
     result = await session.execute(select(User).where(User.email == user_create.email))
     if result.scalar_one_or_none():
         raise HTTPException(
@@ -32,7 +32,7 @@ async def register(
             detail="Email already registered"
         )
     
-    # Check if username already exists (if provided)
+    # Check if username already exists
     if user_create.username:
         result = await session.execute(select(User).where(User.username == user_create.username))
         if result.scalar_one_or_none():
@@ -44,14 +44,17 @@ async def register(
     # Create new user
     user = User(
         email=user_create.email,
-        hashed_password=get_password_hash(user_create.password),
         username=user_create.username,
         name=user_create.name,
         age=user_create.age,
         profession=user_create.profession,
         profile_text=user_create.profile_text,
         community=user_create.community,
-        location=user_create.location
+        location=user_create.location,
+        interests=user_create.interests,
+        age_preference_min=user_create.age_preference_min,
+        age_preference_max=user_create.age_preference_max,
+        hashed_password=get_password_hash(user_create.password)
     )
     
     session.add(user)
@@ -85,14 +88,130 @@ async def login(
             detail="Inactive user"
         )
     
-    # Generate access token
-    from core.security import create_access_token
-    access_token = create_access_token(data={"sub": str(user.id)})
+    # Create tokens using token service
+    token_service = TokenService(session)
+    tokens = await token_service.create_tokens(user)
     
     return TokenResponse(
-        access_token=access_token,
-        user=user
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        user=user,
+        session_id=tokens["session_id"]
     )
+
+# Refresh token endpoint
+@router.post("/refresh", response_model=RefreshTokenResponse)
+async def refresh_token(
+    refresh_data: RefreshTokenRequest,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Refresh access token using refresh token."""
+    try:
+        token_service = TokenService(session)
+        tokens = await token_service.refresh_tokens(refresh_data.refresh_token)
+        
+        return RefreshTokenResponse(
+            access_token=tokens["access_token"],
+            refresh_token=tokens["refresh_token"]
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Token refresh failed"
+        )
+
+# Logout endpoint
+@router.post("/logout")
+async def logout(
+    logout_data: LogoutRequest,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Logout and revoke refresh token."""
+    try:
+        token_service = TokenService(session)
+        revoked = await token_service.revoke_token(logout_data.refresh_token)
+        
+        if revoked:
+            return {"message": "Successfully logged out"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid refresh token"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Logout failed"
+        )
+
+# Get user sessions endpoint
+@router.get("/sessions", response_model=UserSessionsResponse)
+async def get_user_sessions(
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Get all active sessions for the current user."""
+    try:
+        token_service = TokenService(session)
+        sessions = await token_service.get_user_sessions(current_user.id)
+        
+        return UserSessionsResponse(
+            sessions=sessions,
+            total_sessions=len(sessions)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve sessions"
+        )
+
+# Revoke specific session endpoint
+@router.delete("/sessions/{session_id}")
+async def revoke_session(
+    session_id: int,
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Revoke a specific session."""
+    try:
+        token_service = TokenService(session)
+        revoked = await token_service.revoke_session(session_id, current_user.id)
+        
+        if revoked:
+            return {"message": "Session revoked successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to revoke session"
+        )
+
+# Revoke all sessions endpoint
+@router.delete("/sessions")
+async def revoke_all_sessions(
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Revoke all sessions for the current user."""
+    try:
+        token_service = TokenService(session)
+        revoked_count = await token_service.revoke_all_sessions(current_user.id)
+        
+        return {"message": f"Revoked {revoked_count} sessions"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to revoke sessions"
+        )
 
 # Profile update endpoint
 @router.put("/profile", response_model=UserRead)
@@ -102,19 +221,8 @@ async def update_profile(
     session: AsyncSession = Depends(get_async_session)
 ):
     """Update user profile."""
-    # Check if username is being changed and if it's already taken
-    if user_update.username and user_update.username != current_user.username:
-        from sqlalchemy import select
-        result = await session.execute(select(User).where(User.username == user_update.username))
-        if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username already taken"
-            )
-    
     # Update user fields
-    update_data = user_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
+    for field, value in user_update.dict(exclude_unset=True).items():
         setattr(current_user, field, value)
     
     await session.commit()
@@ -130,19 +238,20 @@ async def change_password(
     session: AsyncSession = Depends(get_async_session)
 ):
     """Change user password."""
+    from core.security import get_password_hash, verify_password
+    
+    # Verify current password
     if not verify_password(password_data.current_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Incorrect current password"
+            detail="Current password is incorrect"
         )
     
+    # Update password
     current_user.hashed_password = get_password_hash(password_data.new_password)
     await session.commit()
     
-    return {"message": "Password updated successfully"}
+    return {"message": "Password changed successfully"}
 
-# Get current user profile
-@router.get("/me", response_model=UserRead)
-async def get_current_user(current_user: User = Depends(current_active_user)):
-    """Get current user profile."""
-    return current_user 
+# Import the current_active_user dependency
+from core.auth import current_active_user 

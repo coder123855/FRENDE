@@ -3,6 +3,46 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import UserCard from '../UserCard';
 
+// Mock UI components
+jest.mock('../ui/card', () => ({
+  Card: ({ children, className }) => <div className={className}>{children}</div>,
+  CardContent: ({ children }) => <div>{children}</div>,
+  CardHeader: ({ children }) => <div>{children}</div>,
+  CardTitle: ({ children, className }) => <h3 className={className}>{children}</h3>
+}));
+
+jest.mock('../ui/button', () => ({
+  Button: ({ children, onClick, className, variant, size, disabled }) => (
+    <button onClick={onClick} className={className} data-variant={variant} data-size={size} disabled={disabled}>
+      {children}
+    </button>
+  )
+}));
+
+jest.mock('../ui/avatar', () => ({
+  Avatar: ({ children, className }) => <div className={className}>{children}</div>,
+  AvatarImage: ({ src }) => <img src={src} alt="avatar" />,
+  AvatarFallback: ({ children }) => <div>{children}</div>
+}));
+
+jest.mock('../ui/badge', () => ({
+  Badge: ({ children, variant, className }) => (
+    <span className={className} data-variant={variant}>
+      {children}
+    </span>
+  )
+}));
+
+// Mock lucide-react icons
+jest.mock('lucide-react', () => ({
+  Heart: () => <span>❤</span>,
+  MapPin: () => <span>📍</span>,
+  Users: () => <span>👥</span>,
+  Send: () => <span>📤</span>,
+  Eye: () => <span>👁</span>,
+  Loader2: () => <span>⏳</span>
+}));
+
 const mockUser = {
   id: 1,
   name: 'John Doe',

@@ -140,10 +140,20 @@ npm test
 ```bash
 # Backend
 pytest --cov=.
+# View HTML coverage report
+open htmlcov/index.html
 
 # Frontend
 npm run test:coverage
+# View HTML coverage report
+open coverage/lcov-report/index.html
 ```
+
+### Coverage Requirements
+- **Backend**: Minimum 80% coverage (branches, functions, lines, statements)
+- **Frontend**: Minimum 80% coverage (branches, functions, lines, statements)
+- Coverage reports are generated automatically in CI/CD
+- Coverage thresholds are enforced in pull requests
 
 ## 📊 Current Progress
 

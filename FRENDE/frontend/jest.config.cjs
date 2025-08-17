@@ -17,8 +17,28 @@ module.exports = {
     'src/**/*.{js,jsx,ts,tsx}',
     '!src/**/*.d.ts',
     '!src/main.jsx',
-    '!src/vite-env.d.ts'
+    '!src/vite-env.d.ts',
+    '!src/**/*.test.{js,jsx,ts,tsx}',
+    '!src/**/__tests__/**',
+    '!src/**/*.config.{js,ts}',
+    '!src/**/*.setup.{js,ts}'
   ],
   coverageDirectory: 'coverage',
-  coverageReporters: ['text', 'lcov', 'html']
+  coverageReporters: ['text', 'lcov', 'html', 'json'],
+  coverageThreshold: {
+    global: {
+      branches: 80,
+      functions: 80,
+      lines: 80,
+      statements: 80
+    }
+  },
+  coveragePathIgnorePatterns: [
+    '/node_modules/',
+    '/coverage/',
+    '/dist/',
+    '/build/',
+    '/__mocks__/',
+    '/test-utils/'
+  ]
 }; 

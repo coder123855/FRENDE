@@ -1,0 +1,74 @@
+services:
+  # FastAPI Backend Service
+  - type: web
+    name: frende-api
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: false
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8000
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 1440
+      - key: BCRYPT_ROUNDS
+        value: 12
+      - key: CORS_ALLOW_CREDENTIALS
+        value: true
+      - key: CORS_ALLOW_METHODS
+        value: GET,POST,PUT,DELETE,OPTIONS
+      - key: CORS_ALLOW_HEADERS
+        value: "*"
+      - key: SECURITY_HEADERS_ENABLED
+        value: true
+      - key: CSP_ENABLED
+        value: true
+      - key: HSTS_ENABLED
+        value: true
+      - key: RATE_LIMITING_ENABLED
+        value: true
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FORMAT
+        value: json
+      - key: PERFORMANCE_MONITORING_ENABLED
+        value: true
+      - key: ERROR_DETAILS_IN_PRODUCTION
+        value: false
+      - key: AI_RATE_LIMIT_PER_MINUTE
+        value: 60
+      - key: AI_MAX_TOKENS_PER_REQUEST
+        value: 1000
+      # Database configuration will be set by Render
+      - key: DATABASE_POOL_SIZE
+        value: 10
+      - key: DATABASE_MAX_OVERFLOW
+        value: 20
+      - key: DATABASE_POOL_TIMEOUT
+        value: 30
+      # CORS origins for production frontend
+      - key: CORS_ORIGINS
+        value: https://frende-frontend.vercel.app,https://frende.vercel.app
+      # AI API key (set via Render dashboard)
+      - key: GEMINI_API_KEY
+        sync: false
+    healthCheckPath: /health
+    autoDeploy: true
+    branch: main
+
+databases:
+  # PostgreSQL Database
+  - name: frende-db
+    databaseName: frende
+    user: frende_user
+    plan: starter
