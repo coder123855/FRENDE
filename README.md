@@ -64,6 +64,11 @@ FRENDE/
 - Node.js 18+
 - PostgreSQL 14+
 - Git
+- Google Gemini API Key (for AI features)
+
+### Environment Setup
+1. **Get Google Gemini API Key**: Visit [Google AI Studio](https://makersuite.google.com/app/apikey) to get your API key
+2. **Set up environment variables**: Copy `.env.example` files in both `backend/` and `frontend/` directories
 
 ### Backend Setup
 
@@ -155,26 +160,70 @@ open coverage/lcov-report/index.html
 - Coverage reports are generated automatically in CI/CD
 - Coverage thresholds are enforced in pull requests
 
-## 📊 Current Progress
+## 🚀 Deployment
+
+### Production Deployment
+The app is configured for deployment on modern cloud platforms:
+
+#### Backend Deployment (Render/Railway)
+```bash
+# Set environment variables
+DATABASE_URL=postgresql://...
+GEMINI_API_KEY=your_gemini_api_key
+JWT_SECRET_KEY=your_jwt_secret
+
+# Deploy using the provided configuration files
+# - render.yaml (for Render)
+# - railway.json (for Railway)
+# - Dockerfile (for containerized deployment)
+```
+
+#### Frontend Deployment (Vercel)
+```bash
+# Set environment variables
+VITE_API_URL=https://your-backend-url.com
+VITE_WS_URL=wss://your-backend-url.com
+
+# Deploy using Vercel CLI or GitHub integration
+vercel --prod
+```
+
+### Environment Variables
+See `.env.example` files in both `backend/` and `frontend/` directories for required environment variables.
+
+### CI/CD Pipeline
+The project includes GitHub Actions workflows for:
+- Automated testing
+- Code quality checks
+- Deployment to staging and production
+- Backup monitoring
+- Security scanning
+
+## 📊 Current Status: MVP Complete ✅
 
 ### ✅ Completed Features
-- **Backend Infrastructure**: Database models, authentication, API structure
-- **User Profile System**: Profile management, image upload, validation
-- **Friend Matching System**: Compatibility algorithm, slot system, match requests
-- **Real-time Chat**: WebSocket integration, message persistence
-- **Frontend Components**: React components with Tailwind CSS
-- **Testing**: Unit tests for components and hooks
+- **Backend Infrastructure**: Complete FastAPI backend with PostgreSQL, authentication, and API structure
+- **User Profile System**: Full profile management with image upload, 100-word bio limit, and validation
+- **Friend Matching System**: AI-powered compatibility algorithm with slot system and match requests
+- **Real-time Chat**: WebSocket integration with typing indicators and message persistence
+- **AI-Generated Tasks**: Gemini 2.0 integration for bonding activities and task generation
+- **Frontend Application**: Complete React frontend with responsive design and modern UI
+- **Authentication System**: JWT-based authentication with secure token management
+- **Testing**: Comprehensive unit tests for components, hooks, and API endpoints
+- **Performance Optimization**: Bundle optimization, caching strategies, and PWA features
+- **Error Handling**: Robust error handling with user-friendly messages
+- **Rate Limiting**: Protection against API abuse with proper rate limiting
 
-### 🚧 In Progress
-- **AI-Generated Tasks**: Gemini 2.0 integration for bonding activities
-- **Advanced Matching**: Enhanced compatibility algorithms
-- **Performance Optimization**: Bundle optimization and caching
+### 🚀 Ready for Production
+The Frende MVP is now complete and ready for production deployment. All core features from the PRD have been implemented and tested.
 
-### 📋 Planned Features
-- **Mobile App**: React Native version
-- **Advanced Analytics**: User behavior tracking
-- **Social Features**: Friend groups and communities
-- **Premium Features**: Advanced matching algorithms
+### 📋 Future Enhancements
+- **Mobile App**: React Native version for iOS and Android
+- **Advanced Analytics**: User behavior tracking and insights
+- **Social Features**: Friend groups, communities, and events
+- **Premium Features**: Advanced matching algorithms and premium subscriptions
+- **Internationalization**: Multi-language support
+- **Advanced AI**: Enhanced AI features for better matching and task generation
 
 ## 🤝 Contributing
 
