@@ -10,6 +10,7 @@ from prometheus_client import (
 )
 import time
 import psutil
+import os
 from typing import Dict, Any
 from datetime import datetime, timedelta
 
@@ -23,7 +24,10 @@ router = APIRouter(prefix="/metrics", tags=["metrics"])
 
 # Create a custom registry for multiprocess support
 registry = CollectorRegistry()
-multiprocess.MultiProcessCollector(registry)
+
+# Initialize multiprocess collector only if environment variable is set
+if os.getenv('PROMETHEUS_MULTIPROC_DIR'):
+    multiprocess.MultiProcessCollector(registry)
 
 # Application metrics
 REQUEST_COUNT = Counter(

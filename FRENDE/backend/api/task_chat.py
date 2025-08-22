@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 from core.database import get_async_session
-from core.auth import get_current_user
+from core.auth import current_active_user
 from models.user import User
 from services.task_chat_integration import task_chat_integration_service
 from services.task_notifications import task_notification_service
@@ -25,7 +25,7 @@ async def submit_task_via_chat(
     match_id: int,
     task_id: int,
     submission: TaskSubmissionRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Submit task completion via chat interface"""
@@ -70,7 +70,7 @@ async def submit_task_via_chat(
 @router.get("/matches/{match_id}/notifications", response_model=List[TaskNotificationResponse])
 async def get_task_notifications(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get task notifications for a match"""
@@ -105,7 +105,7 @@ async def get_task_notifications(
 async def mark_notification_read(
     match_id: int,
     notification_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Mark a task notification as read"""
@@ -145,7 +145,7 @@ async def mark_notification_read(
 @router.get("/matches/{match_id}/status", response_model=TaskStatusResponse)
 async def get_task_status(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get current task status for a match"""
@@ -178,7 +178,7 @@ async def get_task_status(
 async def complete_task_via_chat(
     match_id: int,
     task_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Complete a task via chat interface"""
@@ -231,7 +231,7 @@ async def send_task_notification(
     task_id: int,
     notification_type: str,
     message: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Send a task notification via chat"""

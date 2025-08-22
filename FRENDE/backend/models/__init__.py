@@ -6,6 +6,10 @@ from .chat import ChatMessage
 from .refresh_token import RefreshToken
 from .user_session import UserSession
 from .blacklisted_token import BlacklistedToken
+from .push_subscription import PushSubscription
+from .task_submission import TaskSubmission
+from .match_request import MatchRequest
+from .queue_entry import QueueEntry
 
 __all__ = [
     "User",
@@ -14,5 +18,9 @@ __all__ = [
     "ChatMessage",
     "RefreshToken",
     "UserSession",
-    "BlacklistedToken"
+    "BlacklistedToken",
+    "PushSubscription",
+    "TaskSubmission",
+    "MatchRequest",
+    "QueueEntry"
 ] 

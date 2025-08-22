@@ -1,9 +1,9 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, Enum
+import enum
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, Enum, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
 from core.database import Base
-import enum
 
 class TaskDifficulty(str, enum.Enum):
     EASY = "easy"
@@ -11,10 +11,6 @@ class TaskDifficulty(str, enum.Enum):
     HARD = "hard"
 
 class TaskCategory(str, enum.Enum):
-    SOCIAL = "social"
-    CREATIVE = "creative"
-    PHYSICAL = "physical"
-    MENTAL = "mental"
     BONDING = "bonding"
 
 class Task(Base):
@@ -25,17 +21,17 @@ class Task(Base):
     # Task content
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
-    task_type = Column(String(50), default="bonding")  # bonding, generic, interest-based
+    task_type = Column(String(50), default="bonding", index=True)  # bonding, generic, interest-based
     
     # Enhanced task properties
-    difficulty = Column(Enum(TaskDifficulty), default=TaskDifficulty.MEDIUM)
-    category = Column(Enum(TaskCategory), default=TaskCategory.BONDING)
+    difficulty = Column(Enum(TaskDifficulty), default=TaskDifficulty.MEDIUM, index=True)
+    category = Column(Enum(TaskCategory), default=TaskCategory.BONDING, index=True)
     
     # Match relationship
-    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False)
+    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False, index=True)
     
     # Completion tracking (fixed to be nullable)
-    is_completed = Column(Boolean, default=False)
+    is_completed = Column(Boolean, default=False, index=True)
     completed_by_user1 = Column(Boolean, nullable=True, default=None)
     completed_by_user2 = Column(Boolean, nullable=True, default=None)
     completed_at_user1 = Column(DateTime(timezone=True), nullable=True)
@@ -51,16 +47,16 @@ class Task(Base):
     final_coin_reward = Column(Integer, default=10)  # Calculated reward
     
     # AI generation info
-    ai_generated = Column(Boolean, default=True)
+    ai_generated = Column(Boolean, default=True, index=True)
     prompt_used = Column(Text, nullable=True)
     
     # Time tracking
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True)  # 1 day after creation
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)  # 1 day after creation
     
     # Task validation
-    requires_validation = Column(Boolean, default=False)
+    requires_validation = Column(Boolean, default=False, index=True)
     validation_submitted = Column(Boolean, default=False)
     validation_approved = Column(Boolean, nullable=True)
     
@@ -69,111 +65,67 @@ class Task(Base):
     submissions = relationship("TaskSubmission", back_populates="task")
     
     def __repr__(self):
-        return f"<Task(id={self.id}, title='{self.title}', match_id={self.match_id})>"
+        return f"<Task(id={self.id}, title='{self.title}', match_id={self.match_id}, is_completed={self.is_completed})>"
     
     def is_expired(self):
-        """Check if task has expired (1 day after creation)"""
+        """Check if task has expired"""
         if self.expires_at:
             return datetime.utcnow() > self.expires_at
         return datetime.utcnow() > (self.created_at + timedelta(days=1))
     
-    def is_fully_completed(self):
-        """Check if both users have completed the task"""
-        return self.completed_by_user1 and self.completed_by_user2
+    def is_completed_by_user(self, user_id: int) -> bool:
+        """Check if task is completed by a specific user"""
+        if self.match.user1_id == user_id:
+            return self.completed_by_user1 == True
+        elif self.match.user2_id == user_id:
+            return self.completed_by_user2 == True
+        return False
     
-    def get_completion_status(self):
-        """Get detailed completion status"""
-        user1_completed = self.completed_by_user1 is True
-        user2_completed = self.completed_by_user2 is True
-        
-        if user1_completed and user2_completed:
-            return "completed"
-        elif user1_completed or user2_completed:
-            return "partially_completed"
+    def mark_completed_by_user(self, user_id: int):
+        """Mark task as completed by a specific user"""
+        if self.match.user1_id == user_id:
+            self.completed_by_user1 = True
+            self.completed_at_user1 = datetime.utcnow()
+        elif self.match.user2_id == user_id:
+            self.completed_by_user2 = True
+            self.completed_at_user2 = datetime.utcnow()
         else:
-            return "not_started"
-    
-    def calculate_progress(self):
-        """Calculate completion progress percentage"""
-        completed_count = 0
-        if self.completed_by_user1:
-            completed_count += 1
-        if self.completed_by_user2:
-            completed_count += 1
+            raise ValueError(f"User {user_id} is not part of this match")
         
-        self.progress_percentage = (completed_count / 2) * 100
-        return self.progress_percentage
+        # Check if both users completed
+        if self.completed_by_user1 and self.completed_by_user2:
+            self.is_completed = True
+            self.completed_at = datetime.utcnow()
+            self.progress_percentage = 100
     
-    def calculate_reward(self):
+    def get_completion_progress(self) -> dict:
+        """Get task completion progress"""
+        total_users = 2
+        completed_users = 0
+        
+        if self.completed_by_user1:
+            completed_users += 1
+        if self.completed_by_user2:
+            completed_users += 1
+        
+        return {
+            "total_users": total_users,
+            "completed_users": completed_users,
+            "progress_percentage": (completed_users / total_users) * 100,
+            "is_fully_completed": completed_users == total_users
+        }
+    
+    def calculate_reward(self) -> int:
         """Calculate final coin reward based on difficulty"""
         self.final_coin_reward = self.base_coin_reward * self.difficulty_multiplier
         return self.final_coin_reward
     
-    def mark_completed_by_user(self, user_id, match):
-        """Mark task as completed by a specific user"""
-        current_time = datetime.utcnow()
-        
-        if user_id == match.user1_id:
-            if self.completed_by_user1 is None:
-                self.completed_by_user1 = True
-                self.completed_at_user1 = current_time
-            else:
-                raise ValueError(f"Task already completed by user {user_id}")
-        elif user_id == match.user2_id:
-            if self.completed_by_user2 is None:
-                self.completed_by_user2 = True
-                self.completed_at_user2 = current_time
-            else:
-                raise ValueError(f"Task already completed by user {user_id}")
-        else:
-            raise ValueError(f"User {user_id} is not part of match {match.id}")
-        
-        # Update progress
-        self.calculate_progress()
-        
-        # If both users completed, mark as fully completed
-        if self.completed_by_user1 and self.completed_by_user2:
-            self.is_completed = True
-            self.completed_at = current_time
-            self.calculate_reward()
+    def should_be_replaced(self) -> bool:
+        """Check if task should be replaced (expired and not completed)"""
+        return self.is_expired() and not self.is_completed
     
-    def can_be_completed_by_user(self, user_id, match):
-        """Check if a user can complete this task"""
-        if self.is_expired():
-            return False
-        
-        if self.is_completed:
-            return False
-        
-        if user_id == match.user1_id:
-            return self.completed_by_user1 is None
-        elif user_id == match.user2_id:
-            return self.completed_by_user2 is None
-        
-        return False
-    
-    def get_remaining_time(self):
-        """Get remaining time until expiration"""
-        if self.expires_at:
-            remaining = self.expires_at - datetime.utcnow()
-            return max(remaining.total_seconds(), 0)
-        else:
-            # Default 1 day expiration
-            expiration = self.created_at + timedelta(days=1)
-            remaining = expiration - datetime.utcnow()
-            return max(remaining.total_seconds(), 0)
-    
-    def get_difficulty_multiplier(self):
-        """Get coin multiplier based on difficulty"""
-        multipliers = {
-            TaskDifficulty.EASY: 1,
-            TaskDifficulty.MEDIUM: 2,
-            TaskDifficulty.HARD: 3
-        }
-        return multipliers.get(self.difficulty, 1)
-    
-    def to_dict(self):
-        """Convert task to dictionary for API responses"""
+    def to_dict(self) -> dict:
+        """Convert task to dictionary"""
         return {
             "id": self.id,
             "title": self.title,
@@ -183,19 +135,25 @@ class Task(Base):
             "category": self.category.value if self.category else None,
             "match_id": self.match_id,
             "is_completed": self.is_completed,
-            "completed_by_user1": self.completed_by_user1,
-            "completed_by_user2": self.completed_by_user2,
             "progress_percentage": self.progress_percentage,
             "submission_count": self.submission_count,
             "base_coin_reward": self.base_coin_reward,
             "final_coin_reward": self.final_coin_reward,
             "ai_generated": self.ai_generated,
-            "requires_validation": self.requires_validation,
-            "validation_submitted": self.validation_submitted,
-            "validation_approved": self.validation_approved,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
-            "remaining_time": self.get_remaining_time(),
-            "completion_status": self.get_completion_status()
-        } 
+            "requires_validation": self.requires_validation,
+            "validation_submitted": self.validation_submitted,
+            "validation_approved": self.validation_approved
+        }
+
+# Performance optimization indexes
+Index('ix_tasks_match_completed', Task.match_id, Task.is_completed)
+Index('ix_tasks_match_expires', Task.match_id, Task.expires_at)
+Index('ix_tasks_completed_created', Task.is_completed, Task.created_at)
+Index('ix_tasks_expires_active', Task.expires_at, Task.is_completed)
+Index('ix_tasks_difficulty_category', Task.difficulty, Task.category)
+Index('ix_tasks_ai_generated', Task.ai_generated, Task.created_at)
+Index('ix_tasks_validation_status', Task.requires_validation, Task.validation_approved)
+Index('ix_tasks_progress_completion', Task.progress_percentage, Task.is_completed) 

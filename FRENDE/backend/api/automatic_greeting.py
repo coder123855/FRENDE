@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 from core.database import get_async_session
-from core.auth import get_current_user
+from core.auth import current_active_user
 from models.user import User
 from services.automatic_greeting import automatic_greeting_service
 from services.default_greeting import default_greeting_service
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/automatic-greeting", tags=["automatic_greeting"])
 @router.get("/matches/{match_id}/status", response_model=GreetingStatusResponse)
 async def get_greeting_status(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get automatic greeting status for a match"""
@@ -60,7 +60,7 @@ async def get_greeting_status(
 @router.post("/matches/{match_id}/send-automatic")
 async def send_automatic_greeting(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Manually trigger automatic greeting for a match"""
@@ -110,7 +110,7 @@ async def send_automatic_greeting(
 @router.post("/matches/{match_id}/mark-sent")
 async def mark_greeting_sent(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Mark that a greeting has been sent for a match"""
@@ -147,7 +147,7 @@ async def mark_greeting_sent(
 
 @router.get("/pending-timeouts", response_model=PendingTimeoutsResponse)
 async def get_pending_timeouts(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get list of matches with pending timeouts (admin only)"""
@@ -172,7 +172,7 @@ async def get_pending_timeouts(
 
 @router.post("/check-timeouts")
 async def check_timeouts_manually(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Manually check and handle timeouts (admin only)"""
@@ -197,7 +197,7 @@ async def check_timeouts_manually(
 async def get_default_greeting(
     user_name: str,
     template_id: str = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get default greeting for a user"""
     try:
@@ -222,7 +222,7 @@ async def get_default_greeting(
 
 @router.get("/templates")
 async def get_greeting_templates(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get all available greeting templates"""
     try:
@@ -243,7 +243,7 @@ async def get_greeting_templates(
 @router.get("/templates/{template_id}")
 async def get_greeting_template(
     template_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get a specific greeting template"""
     try:
@@ -268,7 +268,7 @@ async def get_greeting_template(
 
 @router.get("/statistics")
 async def get_greeting_statistics(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get greeting system statistics"""
     try:

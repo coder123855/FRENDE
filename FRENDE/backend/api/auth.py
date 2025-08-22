@@ -7,13 +7,13 @@ from core.security import verify_password
 from core.auth import current_active_user
 from models.user import User
 from schemas.user import (
-    UserCreate, UserRead, LoginRequest, TokenResponse, 
+    UserCreate, UserRead, UserUpdate, LoginRequest, TokenResponse, 
     RefreshTokenRequest, RefreshTokenResponse, LogoutRequest,
     UserSessionsResponse, PasswordChangeRequest
 )
 from services.token_service import TokenService
 
-router = APIRouter(prefix="/auth", tags=["authentication"])
+router = APIRouter(tags=["authentication"])
 
 # Custom registration endpoint
 @router.post("/register", response_model=UserRead)

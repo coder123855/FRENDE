@@ -5,8 +5,11 @@ function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
 
+  console.log('ProtectedRoute - isAuthenticated:', isAuthenticated, 'loading:', loading);
+
   // Show loading spinner while checking authentication
   if (loading) {
+    console.log('ProtectedRoute - Showing loading spinner');
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -19,10 +22,12 @@ function ProtectedRoute({ children }) {
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
+    console.log('ProtectedRoute - Redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // Render children if authenticated
+  console.log('ProtectedRoute - Rendering children');
   return children;
 }
 

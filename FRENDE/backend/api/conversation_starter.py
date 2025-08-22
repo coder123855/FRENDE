@@ -4,7 +4,7 @@ from typing import Dict, Any
 import logging
 
 from core.database import get_async_session
-from core.auth import get_current_user
+from core.auth import current_active_user
 from models.user import User
 from services.conversation_starter import conversation_starter_service
 from schemas.conversation_starter import (
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/conversation-starter", tags=["conversation_starter"]
 @router.get("/matches/{match_id}", response_model=ConversationStarterResponse)
 async def get_conversation_starter(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get current conversation starter for a match"""
@@ -47,7 +47,7 @@ async def get_conversation_starter(
 @router.post("/matches/{match_id}/assign", response_model=ConversationStarterAssignResponse)
 async def assign_conversation_starter(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Assign a new conversation starter to a match"""
@@ -84,7 +84,7 @@ async def assign_conversation_starter(
 @router.post("/matches/{match_id}/reset", response_model=ConversationStarterResetResponse)
 async def reset_conversation_starter(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Reset conversation starter for a match"""
@@ -116,7 +116,7 @@ async def reset_conversation_starter(
 @router.post("/matches/{match_id}/check-timeout")
 async def check_starter_timeout(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Check if conversation starter has timed out"""
@@ -160,7 +160,7 @@ async def check_starter_timeout(
 @router.post("/matches/{match_id}/mark-greeting-sent")
 async def mark_greeting_sent(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Mark that a greeting has been sent for a match"""
@@ -198,7 +198,7 @@ async def mark_greeting_sent(
 @router.get("/default-greeting")
 async def get_default_greeting(
     user_name: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get the default greeting message for a user"""
     try:

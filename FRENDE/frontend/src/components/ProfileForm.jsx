@@ -58,7 +58,21 @@ const ProfileForm = ({ onSave, className = "" }) => {
     }
   }, [user, parseInterests]);
 
+  // Helper function to count words
+  const countWords = (text) => {
+    if (!text) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+  };
+
   const handleInputChange = (field, value) => {
+    // Special handling for profile_text field to enforce word limit
+    if (field === 'profile_text') {
+      const wordCount = countWords(value);
+      if (wordCount > 100) {
+        return; // Don't update if over word limit
+      }
+    }
+    
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -78,8 +92,8 @@ const ProfileForm = ({ onSave, className = "" }) => {
       return 'Age must be between 13 and 100.';
     }
     
-    if (formData.profile_text && formData.profile_text.length > 500) {
-      return 'Profile text must be 500 characters or less.';
+    if (formData.profile_text && countWords(formData.profile_text) > 100) {
+      return 'Profile text must be 100 words or less.';
     }
     
     // Validate age preferences
@@ -332,12 +346,11 @@ const ProfileForm = ({ onSave, className = "" }) => {
             value={formData.profile_text}
             onChange={(e) => handleInputChange('profile_text', e.target.value)}
             rows={4}
-            maxLength={500}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-            placeholder="Tell us about yourself (max 500 characters)"
+            placeholder="Tell us about yourself (max 100 words)"
           />
           <div className="text-xs text-gray-500 mt-1 text-right">
-            {formData.profile_text.length}/500 characters
+            {countWords(formData.profile_text)}/100 words
           </div>
         </div>
 

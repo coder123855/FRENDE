@@ -16,9 +16,9 @@ function PublicRoute({ children }) {
     );
   }
 
-  // Redirect to profile if already authenticated
+  // Redirect to home if already authenticated
   if (isAuthenticated) {
-    return <Navigate to="/profile" replace />;
+    return <Navigate to="/home" replace />;
   }
 
   // Render children if not authenticated

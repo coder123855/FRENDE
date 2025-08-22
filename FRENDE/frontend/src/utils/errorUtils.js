@@ -114,8 +114,12 @@ export const logError = (error, context = {}) => {
     console.error('Error logged:', errorData);
   }
   
-  // In production, you'd send this to your error reporting service
-  // Example: Sentry.captureException(error, { extra: errorData });
+  // Capture error in Sentry
+  captureException(error, {
+    error_source: 'error_utils',
+    error_type: 'general_error',
+    ...errorData
+  });
   
   return errorData;
 };

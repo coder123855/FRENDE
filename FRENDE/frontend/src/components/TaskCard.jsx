@@ -14,7 +14,7 @@ import {
   Coins
 } from 'lucide-react';
 import TaskExpirationTimer from './TaskExpirationTimer';
-import { useOfflineState } from '../hooks/useOffline.js';
+import { useOffline } from '../hooks/useOffline';
 
 const TaskCard = ({ 
   task, 
@@ -27,7 +27,7 @@ const TaskCard = ({
 }) => {
   const [isCompleting, setIsCompleting] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
-  const { isOnline } = useOfflineState();
+  const { isOnline } = useOffline();
 
   const handleComplete = async () => {
     if (!onComplete) return;

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
@@ -10,12 +10,12 @@ class Match(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # User relationships
-    user1_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    user2_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user1_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user2_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     
     # Match status
-    status = Column(String(20), default="pending")  # pending, active, completed, expired
-    compatibility_score = Column(Integer, nullable=True)  # 0-100 score
+    status = Column(String(20), default="pending", index=True)  # pending, active, completed, expired
+    compatibility_score = Column(Integer, nullable=True, index=True)  # 0-100 score
     
     # Slot tracking
     slot_used_by_user1 = Column(Boolean, default=False)
@@ -26,19 +26,19 @@ class Match(Base):
     coins_earned_user2 = Column(Integer, default=0)
     
     # Time tracking
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    started_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True, index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
     # Chat room
     chat_room_id = Column(String(100), unique=True, nullable=True)
     
     # Conversation starter fields
-    conversation_starter_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    conversation_starter_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     conversation_started_at = Column(DateTime(timezone=True), nullable=True)
     greeting_sent = Column(Boolean, default=False)
-    starter_timeout_at = Column(DateTime(timezone=True), nullable=True)
+    starter_timeout_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
     # Relationships
     user1 = relationship("User", foreign_keys=[user1_id])
@@ -57,24 +57,69 @@ class Match(Base):
             return datetime.utcnow() > self.expires_at
         return datetime.utcnow() > (self.created_at + timedelta(days=2))
     
+    def is_active(self):
+        """Check if match is active"""
+        return self.status == "active"
+    
+    def is_pending(self):
+        """Check if match is pending"""
+        return self.status == "pending"
+    
     def is_completed(self):
-        """Check if match is completed (50+ coins earned by both users)"""
-        return (self.coins_earned_user1 >= 50 and self.coins_earned_user2 >= 50)
+        """Check if match is completed"""
+        return self.status == "completed"
     
-    def should_expire(self):
-        """Check if match should be marked as expired"""
-        return self.is_expired() or self.is_completed()
+    def get_other_user_id(self, user_id: int) -> int:
+        """Get the ID of the other user in the match"""
+        if self.user1_id == user_id:
+            return self.user2_id
+        elif self.user2_id == user_id:
+            return self.user1_id
+        else:
+            raise ValueError(f"User {user_id} is not part of this match")
     
-    def has_conversation_starter(self):
-        """Check if match has a conversation starter assigned"""
-        return self.conversation_starter_id is not None
+    def get_user_slot_used(self, user_id: int) -> bool:
+        """Check if a user has used their slot for this match"""
+        if self.user1_id == user_id:
+            return self.slot_used_by_user1
+        elif self.user2_id == user_id:
+            return self.slot_used_by_user2
+        else:
+            raise ValueError(f"User {user_id} is not part of this match")
     
-    def is_conversation_starter_expired(self):
-        """Check if conversation starter has timed out"""
-        if not self.starter_timeout_at:
-            return False
-        return datetime.utcnow() > self.starter_timeout_at
+    def mark_slot_used(self, user_id: int):
+        """Mark that a user has used their slot for this match"""
+        if self.user1_id == user_id:
+            self.slot_used_by_user1 = True
+        elif self.user2_id == user_id:
+            self.slot_used_by_user2 = True
+        else:
+            raise ValueError(f"User {user_id} is not part of this match")
     
-    def get_conversation_starter_user_id(self):
-        """Get the user ID of the conversation starter"""
-        return self.conversation_starter_id 
+    def get_coins_earned(self, user_id: int) -> int:
+        """Get coins earned by a user in this match"""
+        if self.user1_id == user_id:
+            return self.coins_earned_user1
+        elif self.user2_id == user_id:
+            return self.coins_earned_user2
+        else:
+            raise ValueError(f"User {user_id} is not part of this match")
+    
+    def add_coins_earned(self, user_id: int, coins: int):
+        """Add coins earned by a user in this match"""
+        if self.user1_id == user_id:
+            self.coins_earned_user1 += coins
+        elif self.user2_id == user_id:
+            self.coins_earned_user2 += coins
+        else:
+            raise ValueError(f"User {user_id} is not part of this match")
+
+# Performance optimization indexes
+Index('ix_matches_user_status', Match.user1_id, Match.user2_id, Match.status)
+Index('ix_matches_status_created', Match.status, Match.created_at)
+Index('ix_matches_active_users', Match.user1_id, Match.user2_id, Match.status, Match.created_at)
+Index('ix_matches_compatibility_status', Match.compatibility_score, Match.status)
+Index('ix_matches_expires_status', Match.expires_at, Match.status)
+Index('ix_matches_conversation_starter', Match.conversation_starter_id, Match.starter_timeout_at)
+Index('ix_matches_user1_status', Match.user1_id, Match.status, Match.created_at)
+Index('ix_matches_user2_status', Match.user2_id, Match.status, Match.created_at) 

@@ -222,6 +222,115 @@ curl https://your-app-url/metrics
 1. **Render**: Built-in monitoring in dashboard
 2. **Railway**: Built-in metrics and logs
 3. **External**: Set up Sentry for error tracking
+   - Create a Sentry project at https://sentry.io
+   - Get your DSN from the project settings
+   - Set the `SENTRY_DSN` environment variable
+   - Configure sampling rates for traces and profiles
+   - Set up alerts and dashboards for monitoring
+
+## Sentry Error Tracking Setup
+
+### Backend Sentry Configuration
+
+1. **Create Sentry Project**
+   - Go to https://sentry.io and create a new project
+   - Choose "FastAPI" as the platform
+   - Copy the DSN from the project settings
+
+2. **Environment Variables**
+   ```bash
+   # Required
+   SENTRY_DSN=https://your-dsn@sentry.io/project-id
+   
+   # Optional (with defaults)
+   SENTRY_DEBUG_ENABLED=false
+   SENTRY_TRACES_SAMPLE_RATE=0.1
+   SENTRY_PROFILES_SAMPLE_RATE=0.1
+   ```
+
+3. **Features Enabled**
+   - ✅ Automatic error capture and reporting
+   - ✅ Performance monitoring with traces
+   - ✅ User context tracking
+   - ✅ Request/response monitoring
+   - ✅ Database query monitoring
+   - ✅ HTTP client monitoring
+   - ✅ Structured logging integration
+
+4. **Testing Sentry Integration**
+   ```bash
+   # Run the Sentry integration tests
+   python -m pytest tests/test_sentry_integration.py -v
+   
+   # Test error reporting manually
+   curl -X GET http://localhost:8000/api/v1/nonexistent
+   ```
+
+### Frontend Sentry Configuration
+
+1. **Environment Variables**
+   ```bash
+   # Required
+   VITE_SENTRY_DSN=https://your-dsn@sentry.io/project-id
+   
+   # Optional (with defaults)
+   VITE_SENTRY_DEBUG_ENABLED=false
+   VITE_ENVIRONMENT=production
+   VITE_APP_VERSION=1.0.0
+   ```
+
+2. **Features Enabled**
+   - ✅ React error boundary integration
+   - ✅ Performance monitoring with BrowserTracing
+   - ✅ User context tracking
+   - ✅ Breadcrumb tracking for user actions
+   - ✅ Source map uploads for production builds
+   - ✅ Automatic error capture
+
+3. **Testing Frontend Sentry Integration**
+   ```bash
+   # Run the Sentry integration tests
+   npm test -- --testPathPattern=test_sentry_integration
+   
+   # Test error boundary manually
+   # Open browser console and run:
+   window.runSentryTests()
+   ```
+
+### Sentry Dashboard Configuration
+
+1. **Alerts Setup**
+   - Create alerts for error rate spikes
+   - Set up alerts for performance degradation
+   - Configure alerts for specific error types
+
+2. **Dashboards**
+   - Error rate dashboard
+   - Performance metrics dashboard
+   - User experience dashboard
+   - Release tracking dashboard
+
+3. **Release Tracking**
+   - Configure release tracking in CI/CD
+   - Set up source map uploads
+   - Monitor release health
+
+### Monitoring Best Practices
+
+1. **Error Filtering**
+   - Filter out expected errors (404s, validation errors)
+   - Set up error sampling for high-volume errors
+   - Configure environment-specific filtering
+
+2. **Performance Monitoring**
+   - Monitor API response times
+   - Track database query performance
+   - Monitor frontend bundle size and load times
+
+3. **User Experience**
+   - Track user journey errors
+   - Monitor conversion funnel issues
+   - Set up user feedback collection
 
 ## Database Migration
 

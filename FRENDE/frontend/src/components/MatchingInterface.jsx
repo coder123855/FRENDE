@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Loader2, Heart, X, Clock, CheckCircle, XCircle, Plus, Calendar, MessageCircle, RefreshCw, AlertCircle } from 'lucide-react';
+import { Loader2, Heart, X, Clock, CheckCircle, XCircle, Plus, Calendar, MessageCircle, RefreshCw, AlertCircle, Sparkles } from 'lucide-react';
 import CoinBalance from './CoinBalance';
 import SlotInfo from './SlotInfo';
 import SlotPurchaseModal from './SlotPurchaseModal';
@@ -21,6 +22,7 @@ import ErrorFallback from './error-states/ErrorFallback';
 
 
 export default function MatchingInterface() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("discover");
   const [sendingRequest, setSendingRequest] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -69,13 +71,18 @@ export default function MatchingInterface() {
     setSendingRequest(true);
     try {
       // Create match request using the API
-      await matchAPI.createMatch({ target_user_id: userId });
+      const response = await matchAPI.createMatch({ target_user_id: userId });
       
       // Remove user from compatible users list
       removeUser(userId);
       
-      // Show success notification
-      alert('Match request sent successfully!');
+      // Navigate to match success page if we have a match ID
+      if (response && response.match_id) {
+        navigate(`/match-success/${response.match_id}`);
+      } else {
+        // Show success notification
+        alert('Match request sent successfully!');
+      }
     } catch (error) {
       console.error('Failed to send request:', error);
       alert('Failed to send request. Please try again.');
@@ -123,8 +130,7 @@ export default function MatchingInterface() {
   };
 
   const handleChat = (matchId) => {
-    // TODO: Navigate to chat interface
-    console.log('Navigate to chat for match:', matchId);
+    navigate(`/chat/${matchId}`);
   };
 
 
@@ -153,51 +159,75 @@ export default function MatchingInterface() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Find Friends</h1>
-            <p className="text-gray-600">Discover and connect with people who share your interests</p>
+    <div className="max-w-6xl mx-auto p-6 space-y-8">
+      {/* Header Section */}
+      <div className="text-center space-y-4">
+        <div className="flex items-center justify-center space-x-3 mb-6">
+          <div className="w-12 h-12 bg-gradient-to-r from-primary-500 to-secondary-500 rounded-2xl flex items-center justify-center">
+            <Sparkles className="w-6 h-6 text-white" />
           </div>
-          <div className="flex items-center space-x-4">
-            <CoinBalance coins={userCoins} />
-            <SlotInfo 
-              availableSlots={slotInfo.availableSlots}
-              totalUsed={slotInfo.totalUsed}
-              purchaseCost={slotInfo.purchaseCost}
-              onPurchaseClick={() => setShowPurchaseModal(true)}
-              showPurchaseButton={slotInfo.availableSlots <= 1}
-            />
-          </div>
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-primary-600 to-secondary-600 bg-clip-text text-transparent">
+            Find Friends
+          </h1>
+        </div>
+        <p className="text-lg text-foreground-secondary max-w-2xl mx-auto">
+          Discover and connect with people who share your interests and values
+        </p>
+        
+        {/* Stats Bar */}
+        <div className="flex items-center justify-center space-x-6 mt-8">
+          <CoinBalance coins={userCoins} />
+          <SlotInfo 
+            availableSlots={slotInfo.availableSlots}
+            totalUsed={slotInfo.totalUsed}
+            purchaseCost={slotInfo.purchaseCost}
+            onPurchaseClick={() => setShowPurchaseModal(true)}
+            showPurchaseButton={slotInfo.availableSlots <= 1}
+          />
         </div>
       </div>
 
+      {/* Tabs Navigation */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="discover" className="flex items-center gap-2">
+        <TabsList className="grid w-full grid-cols-5 bg-background-secondary p-1 rounded-2xl shadow-sm">
+          <TabsTrigger value="discover" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-md transition-all duration-200">
             <Heart className="w-4 h-4" />
-            Discover
+            <span className="hidden sm:inline">Discover</span>
           </TabsTrigger>
-          <TabsTrigger value="pending" className="flex items-center gap-2">
+          <TabsTrigger value="pending" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-md transition-all duration-200">
             <Clock className="w-4 h-4" />
-            Pending ({pendingMatches.length})
+            <span className="hidden sm:inline">Pending</span>
+            {pendingMatches.length > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">
+                {pendingMatches.length}
+              </Badge>
+            )}
           </TabsTrigger>
-          <TabsTrigger value="active" className="flex items-center gap-2">
+          <TabsTrigger value="active" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-md transition-all duration-200">
             <MessageCircle className="w-4 h-4" />
-            Active ({activeMatches.length})
+            <span className="hidden sm:inline">Active</span>
+            {activeMatches.length > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">
+                {activeMatches.length}
+              </Badge>
+            )}
           </TabsTrigger>
-          <TabsTrigger value="expired" className="flex items-center gap-2">
+          <TabsTrigger value="expired" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-md transition-all duration-200">
             <XCircle className="w-4 h-4" />
-            Expired ({expiredMatches.length})
+            <span className="hidden sm:inline">Expired</span>
+            {expiredMatches.length > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">
+                {expiredMatches.length}
+              </Badge>
+            )}
           </TabsTrigger>
-          <TabsTrigger value="history" className="flex items-center gap-2">
+          <TabsTrigger value="history" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-md transition-all duration-200">
             <Calendar className="w-4 h-4" />
-            History
+            <span className="hidden sm:inline">History</span>
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="discover" className="mt-6">
+        <TabsContent value="discover" className="mt-8 space-y-6">
           {/* Error State */}
           {compatibleUsersError && (
             <ErrorFallback
@@ -238,10 +268,11 @@ export default function MatchingInterface() {
                   <Button 
                     onClick={loadMore}
                     variant="outline"
-                    className="px-8"
+                    size="lg"
+                    className="px-8 rounded-xl"
                   >
                     <RefreshCw className="w-4 h-4 mr-2" />
-                    Load More Users
+                    Load More Friends
                   </Button>
                 </div>
               )}
@@ -249,22 +280,24 @@ export default function MatchingInterface() {
               {/* Loading More State */}
               {compatibleUsersLoading && compatibleUsers.length > 0 && (
                 <div className="text-center mt-8">
-                  <Loader2 className="w-8 h-8 text-gray-400 mx-auto animate-spin" />
-                  <p className="text-gray-600 mt-2">Loading more users...</p>
+                  <Loader2 className="w-8 h-8 text-primary-400 mx-auto animate-spin" />
+                  <p className="text-foreground-secondary mt-2">Finding more friends for you...</p>
                 </div>
               )}
 
               {/* No Users State */}
               {compatibleUsers.length === 0 && !compatibleUsersLoading && !compatibleUsersError && (
-                <div className="text-center py-12">
-                  <Heart className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No compatible users found</h3>
-                  <p className="text-gray-600 mb-4">
-                    We couldn't find any users that match your preferences right now.
+                <div className="text-center py-16">
+                  <div className="w-20 h-20 bg-gradient-to-r from-primary-100 to-secondary-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Heart className="w-10 h-10 text-primary-500" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-foreground mb-3">No compatible friends found</h3>
+                  <p className="text-foreground-secondary mb-6 max-w-md mx-auto">
+                    We couldn't find any users that match your preferences right now. Try refreshing or check back later!
                   </p>
-                  <Button onClick={refreshCompatibleUsers} variant="outline">
+                  <Button onClick={refreshCompatibleUsers} variant="outline" size="lg" className="rounded-xl">
                     <RefreshCw className="w-4 h-4 mr-2" />
-                    Refresh
+                    Refresh Search
                   </Button>
                 </div>
               )}
@@ -272,8 +305,8 @@ export default function MatchingInterface() {
           )}
         </TabsContent>
 
-        <TabsContent value="pending" className="mt-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <TabsContent value="pending" className="mt-8">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {pendingMatches.map((match) => (
               <MatchStatusCard
                 key={match.id}
@@ -287,16 +320,18 @@ export default function MatchingInterface() {
           </div>
 
           {pendingMatches.length === 0 && (
-            <div className="text-center py-12">
-              <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No pending matches</h3>
-              <p className="text-gray-600">When people send you match requests, they'll appear here.</p>
+            <div className="text-center py-16">
+              <div className="w-20 h-20 bg-gradient-to-r from-warning-100 to-accent-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Clock className="w-10 h-10 text-warning-500" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground mb-3">No pending matches</h3>
+              <p className="text-foreground-secondary">When people send you match requests, they'll appear here.</p>
             </div>
           )}
         </TabsContent>
 
-        <TabsContent value="active" className="mt-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <TabsContent value="active" className="mt-8">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {activeMatches.map((match) => (
               <MatchStatusCard
                 key={match.id}
@@ -310,16 +345,18 @@ export default function MatchingInterface() {
           </div>
 
           {activeMatches.length === 0 && (
-            <div className="text-center py-12">
-              <MessageCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No active matches</h3>
-              <p className="text-gray-600">Your active conversations will appear here.</p>
+            <div className="text-center py-16">
+              <div className="w-20 h-20 bg-gradient-to-r from-success-100 to-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <MessageCircle className="w-10 h-10 text-success-500" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground mb-3">No active conversations</h3>
+              <p className="text-foreground-secondary">Your active conversations will appear here once you start chatting!</p>
             </div>
           )}
         </TabsContent>
 
-        <TabsContent value="expired" className="mt-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <TabsContent value="expired" className="mt-8">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {expiredMatches.map((match) => (
               <MatchStatusCard
                 key={match.id}
@@ -333,15 +370,17 @@ export default function MatchingInterface() {
           </div>
 
           {expiredMatches.length === 0 && (
-            <div className="text-center py-12">
-              <XCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No expired matches</h3>
-              <p className="text-gray-600">Expired matches will appear here.</p>
+            <div className="text-center py-16">
+              <div className="w-20 h-20 bg-gradient-to-r from-neutral-100 to-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <XCircle className="w-10 h-10 text-neutral-500" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground mb-3">No expired matches</h3>
+              <p className="text-foreground-secondary">Expired matches will appear here when they time out.</p>
             </div>
           )}
         </TabsContent>
 
-        <TabsContent value="history" className="mt-6">
+        <TabsContent value="history" className="mt-8">
           <PurchaseHistory />
         </TabsContent>
       </Tabs>

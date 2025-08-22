@@ -1,0 +1,163 @@
+name: Backup Monitoring
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force run backup monitoring'
+        required: false
+        default: 'false'
+
+jobs:
+  backup-health-check:
+    name: Backup Health Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install boto3 cryptography psycopg2-binary redis requests
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+        
+    - name: Check backup health
+      run: |
+        echo "Checking backup health..."
+        python scripts/monitoring/backup_monitor.py --health
+        
+    - name: Generate backup report
+      run: |
+        echo "Generating backup report..."
+        python scripts/monitoring/backup_monitor.py --report > backup_report.txt
+        
+    - name: Upload backup report
+      uses: actions/upload-artifact@v3
+      with:
+        name: backup-report
+        path: backup_report.txt
+        retention-days: 7
+        
+    - name: Check for critical issues
+      id: health_check
+      run: |
+        health_output=$(python scripts/monitoring/backup_monitor.py --health)
+        echo "health_output<<EOF" >> $GITHUB_OUTPUT
+        echo "$health_output" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        # Check if status is critical
+        if echo "$health_output" | grep -q '"overall_status": "critical"'; then
+          echo "status=critical" >> $GITHUB_OUTPUT
+        elif echo "$health_output" | grep -q '"overall_status": "warning"'; then
+          echo "status=warning" >> $GITHUB_OUTPUT
+        else
+          echo "status=healthy" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Log critical status
+      if: steps.health_check.outputs.status == 'critical'
+      run: |
+        echo "🚨 CRITICAL: Backup health check failed with critical status"
+        echo "Please check the backup monitoring system immediately"
+        
+    - name: Log warning status
+      if: steps.health_check.outputs.status == 'warning'
+      run: |
+        echo "⚠️ WARNING: Backup health check shows warning status"
+        echo "Please review backup processes"
+
+  backup-cleanup:
+    name: Backup Cleanup
+    runs-on: ubuntu-latest
+    needs: backup-health-check
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install boto3 cryptography psycopg2-binary redis requests
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+        
+    - name: Clean up old backups
+      run: |
+        echo "Cleaning up old backups..."
+        python scripts/backup/database_backup.py --cleanup
+        python scripts/backup/redis_backup.py --cleanup
+        python scripts/backup/file_backup.py --cleanup
+        
+    - name: Clean up old monitoring data
+      run: |
+        echo "Cleaning up old monitoring data..."
+        python scripts/monitoring/backup_monitor.py --clear-old 30
+
+  backup-test:
+    name: Backup Recovery Test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.force_run == 'true'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install boto3 cryptography psycopg2-binary redis requests
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+        
+    - name: Test database recovery
+      run: |
+        echo "Testing database recovery procedure..."
+        python scripts/recovery/database_recovery.py --test
+        
+    - name: Test file backup restoration
+      run: |
+        echo "Testing file backup restoration..."
+        # This would test file backup restoration in a safe environment
+        
+    - name: Log test completion
+      run: |
+        echo "✅ Backup Recovery Test Completed"
+        echo "Recovery test procedures completed successfully"

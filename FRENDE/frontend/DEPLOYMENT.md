@@ -198,6 +198,10 @@ You can configure webhooks for:
 
 ### Custom Monitoring
 - **Sentry integration** for error tracking
+  - Set `VITE_SENTRY_DSN` environment variable
+  - Configure `VITE_SENTRY_DEBUG_ENABLED` for development
+  - Set up source map uploads for production builds
+  - Configure performance monitoring and error boundaries
 - **PostHog** for user analytics
 - **Custom logging** for debugging
 

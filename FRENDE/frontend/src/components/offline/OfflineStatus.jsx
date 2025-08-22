@@ -1,171 +1,284 @@
 import React from 'react';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Progress } from '../ui/progress';
-import { Wifi, WifiOff, RefreshCw, Clock, AlertTriangle, CheckCircle } from 'lucide-react';
-import { useOfflineState, useSync } from '../../hooks/useOffline.js';
+import { useOffline } from '../../hooks/useOffline';
 
-const OfflineStatus = ({ showDetails = false, className = '' }) => {
-  const { isOnline, syncInProgress, syncProgress, lastSync, error } = useOfflineState();
-  const { sync } = useSync();
-
-  const formatLastSync = (timestamp) => {
-    if (!timestamp) return 'Never';
-    
-    const now = Date.now();
-    const diff = now - timestamp;
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return `${days}d ago`;
-  };
+const OfflineStatus = () => {
+  const {
+    isOnline,
+    isServiceWorkerReady,
+    syncStatus,
+    offlineActions,
+    storageStats,
+    performSync,
+    updateServiceWorker,
+    skipWaiting,
+    clearAllOfflineData
+  } = useOffline();
 
   const handleSync = async () => {
     try {
-      await sync();
+      await performSync();
     } catch (error) {
-      console.error('Manual sync failed:', error);
+      console.error('Sync failed:', error);
     }
   };
 
-  if (!showDetails) {
-    // Compact status indicator
-    return (
-      <div className={`flex items-center space-x-2 ${className}`}>
-        {isOnline ? (
-          <Badge variant="default" className="flex items-center space-x-1">
-            <Wifi className="w-3 h-3" />
-            <span>Online</span>
-          </Badge>
-        ) : (
-          <Badge variant="destructive" className="flex items-center space-x-1">
-            <WifiOff className="w-3 h-3" />
-            <span>Offline</span>
-          </Badge>
-        )}
-        
-        {syncInProgress && (
-          <div className="flex items-center space-x-1">
-            <RefreshCw className="w-3 h-3 animate-spin text-blue-600" />
-            <span className="text-xs text-gray-600">Syncing...</span>
-          </div>
-        )}
-      </div>
-    );
-  }
+  const handleUpdate = async () => {
+    try {
+      await updateServiceWorker();
+    } catch (error) {
+      console.error('Update failed:', error);
+    }
+  };
 
-  // Detailed status card
+  const handleSkipWaiting = async () => {
+    try {
+      await skipWaiting();
+    } catch (error) {
+      console.error('Skip waiting failed:', error);
+    }
+  };
+
+  const handleClearData = async () => {
+    if (window.confirm('Are you sure you want to clear all offline data? This cannot be undone.')) {
+      try {
+        await clearAllOfflineData();
+      } catch (error) {
+        console.error('Clear data failed:', error);
+      }
+    }
+  };
+
   return (
-    <Card className={`${className}`}>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-lg flex items-center justify-between">
-          <span>Connection Status</span>
-          {isOnline ? (
-            <Badge variant="default" className="flex items-center space-x-1">
-              <Wifi className="w-3 h-3" />
-              <span>Online</span>
-            </Badge>
-          ) : (
-            <Badge variant="destructive" className="flex items-center space-x-1">
-              <WifiOff className="w-3 h-3" />
-              <span>Offline</span>
-            </Badge>
-          )}
-        </CardTitle>
-      </CardHeader>
-      
-      <CardContent className="space-y-4">
-        {/* Sync Progress */}
-        {syncInProgress && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center space-x-1">
-                <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
-                <span>Syncing data...</span>
-              </span>
-              <span className="text-gray-600">{syncProgress}%</span>
-            </div>
-            <Progress value={syncProgress} className="h-2" />
-          </div>
-        )}
+    <div className="offline-status">
+      {/* Connection Status */}
+      <div className={`status-indicator ${isOnline ? 'online' : 'offline'}`}>
+        <div className="status-dot"></div>
+        <span className="status-text">
+          {isOnline ? 'Online' : 'Offline'}
+        </span>
+      </div>
 
-        {/* Last Sync Time */}
-        <div className="flex items-center justify-between text-sm">
-          <span className="flex items-center space-x-1 text-gray-600">
-            <Clock className="w-4 h-4" />
-            <span>Last sync:</span>
+      {/* Service Worker Status */}
+      <div className="sw-status">
+        <span className="sw-indicator">
+          {isServiceWorkerReady ? '🟢' : '🔴'} SW
+        </span>
+      </div>
+
+      {/* Sync Status */}
+      {syncStatus !== 'idle' && (
+        <div className={`sync-status ${syncStatus}`}>
+          <span className="sync-text">
+            {syncStatus === 'syncing' && '🔄 Syncing...'}
+            {syncStatus === 'completed' && '✅ Sync Complete'}
+            {syncStatus === 'failed' && '❌ Sync Failed'}
           </span>
-          <span className="font-medium">{formatLastSync(lastSync)}</span>
         </div>
+      )}
 
-        {/* Error Display */}
-        {error && (
-          <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <AlertTriangle className="w-4 h-4 text-red-600" />
-            <span className="text-sm text-red-700">{error}</span>
-          </div>
+      {/* Offline Actions Count */}
+      {offlineActions.length > 0 && (
+        <div className="offline-actions-count">
+          <span className="count-badge">
+            {offlineActions.length} pending
+          </span>
+        </div>
+      )}
+
+      {/* Storage Stats */}
+      {storageStats && (
+        <div className="storage-stats">
+          <span className="stats-text">
+            {storageStats.totalEntries || 0} cached items
+          </span>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="offline-actions">
+        {!isOnline && offlineActions.length > 0 && (
+          <button
+            onClick={handleSync}
+            disabled={syncStatus === 'syncing'}
+            className="sync-btn"
+            title="Sync offline actions when online"
+          >
+            🔄 Sync
+          </button>
         )}
 
-        {/* Sync Button */}
-        <div className="flex space-x-2">
-          <Button 
-            onClick={handleSync} 
-            disabled={syncInProgress || !isOnline}
-            className="flex-1"
-            size="sm"
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${syncInProgress ? 'animate-spin' : ''}`} />
-            {syncInProgress ? 'Syncing...' : 'Sync Now'}
-          </Button>
-          
-          {!isOnline && (
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => window.location.reload()}
-            >
-              Retry
-            </Button>
-          )}
-        </div>
+        <button
+          onClick={handleUpdate}
+          className="update-btn"
+          title="Check for updates"
+        >
+          🔄 Update
+        </button>
 
-        {/* Status Indicators */}
-        <div className="grid grid-cols-2 gap-4 pt-2">
-          <div className="text-center p-3 bg-gray-50 rounded-lg">
-            <div className="text-2xl font-bold text-gray-900">
-              {isOnline ? (
-                <CheckCircle className="w-6 h-6 text-green-600 mx-auto" />
-              ) : (
-                <WifiOff className="w-6 h-6 text-red-600 mx-auto" />
-              )}
-            </div>
-            <div className="text-xs text-gray-600 mt-1">
-              {isOnline ? 'Connected' : 'Disconnected'}
-            </div>
-          </div>
-          
-          <div className="text-center p-3 bg-gray-50 rounded-lg">
-            <div className="text-2xl font-bold text-gray-900">
-              {syncInProgress ? (
-                <RefreshCw className="w-6 h-6 text-blue-600 mx-auto animate-spin" />
-              ) : lastSync ? (
-                <CheckCircle className="w-6 h-6 text-green-600 mx-auto" />
-              ) : (
-                <AlertTriangle className="w-6 h-6 text-yellow-600 mx-auto" />
-              )}
-            </div>
-            <div className="text-xs text-gray-600 mt-1">
-              {syncInProgress ? 'Syncing' : lastSync ? 'Synced' : 'Not synced'}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+        <button
+          onClick={handleSkipWaiting}
+          className="skip-btn"
+          title="Apply service worker update"
+        >
+          ⚡ Skip
+        </button>
+
+        <button
+          onClick={handleClearData}
+          className="clear-btn"
+          title="Clear all offline data"
+        >
+          🗑️ Clear
+        </button>
+      </div>
+
+      <style jsx>{`
+        .offline-status {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          background: rgba(255, 255, 255, 0.9);
+          border-radius: 20px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .status-indicator {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          animation: pulse 2s infinite;
+        }
+
+        .status-indicator.online .status-dot {
+          background: #10b981;
+        }
+
+        .status-indicator.offline .status-dot {
+          background: #ef4444;
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+
+        .status-text {
+          color: #374151;
+        }
+
+        .sw-status {
+          display: flex;
+          align-items: center;
+        }
+
+        .sw-indicator {
+          font-size: 10px;
+          color: #6b7280;
+        }
+
+        .sync-status {
+          padding: 2px 6px;
+          border-radius: 10px;
+          font-size: 10px;
+        }
+
+        .sync-status.syncing {
+          background: #fef3c7;
+          color: #92400e;
+        }
+
+        .sync-status.completed {
+          background: #d1fae5;
+          color: #065f46;
+        }
+
+        .sync-status.failed {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+
+        .offline-actions-count {
+          display: flex;
+          align-items: center;
+        }
+
+        .count-badge {
+          background: #ef4444;
+          color: white;
+          padding: 2px 6px;
+          border-radius: 10px;
+          font-size: 10px;
+          font-weight: 600;
+        }
+
+        .storage-stats {
+          display: flex;
+          align-items: center;
+        }
+
+        .stats-text {
+          color: #6b7280;
+          font-size: 10px;
+        }
+
+        .offline-actions {
+          display: flex;
+          gap: 4px;
+        }
+
+        .sync-btn,
+        .update-btn,
+        .skip-btn,
+        .clear-btn {
+          background: none;
+          border: none;
+          padding: 4px 6px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 10px;
+          transition: background-color 0.2s;
+        }
+
+        .sync-btn:hover,
+        .update-btn:hover,
+        .skip-btn:hover {
+          background: #f3f4f6;
+        }
+
+        .clear-btn:hover {
+          background: #fee2e2;
+        }
+
+        .sync-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        @media (max-width: 768px) {
+          .offline-status {
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 6px 8px;
+          }
+
+          .offline-actions {
+            order: 2;
+            width: 100%;
+            justify-content: center;
+            margin-top: 4px;
+          }
+        }
+      `}</style>
+    </div>
   );
 };
 

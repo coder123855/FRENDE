@@ -4,13 +4,69 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#667eea" />
     <meta name="description" content="Frende - AI-powered social media app to help users make new friends through AI and fun challenges" />
     <meta name="keywords" content="friends, social media, AI, matching, chat, tasks" />
     <meta name="author" content="Frende Team" />
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/assets/icon-192x192.png" />
+    
+    <!-- DNS Prefetch for external resources -->
+    <link rel="dns-prefetch" href="//fonts.googleapis.com" />
+    <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
+    <link rel="dns-prefetch" href="//unpkg.com" />
+    
+    <!-- Preconnect to external domains -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    
+    <!-- Resource hints for critical assets -->
+    <link rel="preload" href="/src/main.jsx" as="script" />
+    <link rel="preload" href="/src/index.css" as="style" />
+    
+    <!-- Preload critical fonts -->
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" /></noscript>
+    
+    <!-- Compression support detection -->
+    <script>
+      // Detect compression support
+      const supportsGzip = 'gzip' in new CompressionStream();
+      const supportsBrotli = 'br' in new CompressionStream();
+      
+      // Store compression support in sessionStorage for later use
+      sessionStorage.setItem('compressionSupport', JSON.stringify({
+        gzip: supportsGzip,
+        brotli: supportsBrotli
+      }));
+    </script>
+    
     <title>Frende - Make New Friends with AI</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- Performance monitoring script -->
+    <script>
+      // Performance monitoring
+      if ('performance' in window) {
+        window.addEventListener('load', () => {
+          const perfData = performance.getEntriesByType('navigation')[0];
+          const loadTime = perfData.loadEventEnd - perfData.loadEventStart;
+          
+          // Send performance data to analytics
+          if (window.gtag) {
+            window.gtag('event', 'page_load_time', {
+              value: loadTime,
+              custom_parameter: 'load_time_ms'
+            });
+          }
+        });
+      }
+    </script>
   </body>
 </html>

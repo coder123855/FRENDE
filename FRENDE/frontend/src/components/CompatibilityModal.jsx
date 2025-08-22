@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
+import OptimizedAvatar from './ui/OptimizedAvatar';
 import { Badge } from './ui/badge';
 import { Heart, X, User, MapPin, Building, Star, Users } from 'lucide-react';
 import CompatibilityBadge from './CompatibilityBadge';
@@ -53,12 +53,12 @@ const CompatibilityModal = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <Avatar className="w-8 h-8">
-                <AvatarImage src={user.profile_picture} />
-                <AvatarFallback className="bg-gray-200">
-                  {user.name ? user.name.split(' ').map(n => n[0]).join('') : 'U'}
-                </AvatarFallback>
-              </Avatar>
+              <OptimizedAvatar
+                src={user.profile_picture_url}
+                name={user.name}
+                size="sm"
+                className="w-8 h-8"
+              />
               <span>Compatibility with {user.name}</span>
             </div>
             <Button

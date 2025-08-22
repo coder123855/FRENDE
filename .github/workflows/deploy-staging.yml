@@ -1,0 +1,143 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [ develop ]
+  workflow_dispatch:
+
+jobs:
+  deploy-frontend-staging:
+    name: Deploy Frontend to Staging
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        cache-dependency-path: FRENDE/frontend/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: FRENDE/frontend
+      run: npm ci
+      
+    - name: Build frontend
+      working-directory: FRENDE/frontend
+      env:
+        VITE_API_URL: ${{ secrets.STAGING_API_URL }}
+        VITE_WS_URL: ${{ secrets.STAGING_WS_URL }}
+        VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        VITE_ENVIRONMENT: staging
+      run: npm run build
+      
+    - name: Deploy to Vercel (Staging)
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        working-directory: ./FRENDE/frontend
+        vercel-args: '--prod'
+        
+    - name: Upload source maps to Sentry
+      working-directory: FRENDE/frontend
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+        SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+      run: |
+        npx @sentry/cli releases new staging-${{ github.sha }}
+        npx @sentry/cli releases files staging-${{ github.sha }} upload-sourcemaps ./dist
+        npx @sentry/cli releases finalize staging-${{ github.sha }}
+
+  deploy-backend-staging:
+    name: Deploy Backend to Staging
+    runs-on: ubuntu-latest
+    needs: deploy-frontend-staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      working-directory: FRENDE/backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run database migrations
+      working-directory: FRENDE/backend
+      env:
+        DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        ENVIRONMENT: staging
+      run: |
+        alembic upgrade head
+        alembic current
+        
+    - name: Deploy to Render (Staging)
+      run: |
+        curl -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_STAGING_SERVICE_ID }}/deploys" \
+          -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+          -H "Content-Type: application/json" \
+          -d '{"clearCache": "do_not_clear"}'
+          
+    - name: Wait for deployment
+      run: |
+        echo "Waiting for deployment to complete..."
+        sleep 60
+        
+    - name: Verify deployment health
+      run: |
+        echo "Checking deployment health..."
+        curl -f ${{ secrets.STAGING_API_URL }}/health || exit 1
+        
+    - name: Create Sentry release
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+        SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+      run: |
+        npx @sentry/cli releases new backend-staging-${{ github.sha }}
+        npx @sentry/cli releases finalize backend-staging-${{ github.sha }}
+
+  smoke-tests-staging:
+    name: Smoke Tests (Staging)
+    runs-on: ubuntu-latest
+    needs: [deploy-frontend-staging, deploy-backend-staging]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        
+    - name: Install Playwright
+      run: npx playwright install --with-deps
+      
+    - name: Run smoke tests
+      env:
+        STAGING_FRONTEND_URL: ${{ secrets.STAGING_FRONTEND_URL }}
+        STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+      run: |
+        echo "Running smoke tests against staging environment..."
+        # Add actual smoke test commands here
+        curl -f ${{ secrets.STAGING_API_URL }}/health
+        curl -f ${{ secrets.STAGING_FRONTEND_URL }}
+        
+    - name: Notify deployment success
+      run: |
+        echo "✅ Staging deployment completed successfully!"
+        echo "Frontend: ${{ secrets.STAGING_FRONTEND_URL }}"
+        echo "Backend: ${{ secrets.STAGING_API_URL }}"

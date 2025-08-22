@@ -25,7 +25,7 @@ import { useConversationStarter } from '../hooks/useConversationStarter';
 import { useAutomaticGreeting } from '../hooks/useAutomaticGreeting';
 import { useTaskChat } from '../hooks/useTaskChat';
 import { useAuth } from '../hooks/useAuth';
-import { useOfflineState } from '../hooks/useOffline.js';
+import { useOffline } from '../hooks/useOffline';
 import TaskStatusPanel from './TaskStatusPanel';
 import TaskNotification from './TaskNotification';
 
@@ -89,7 +89,7 @@ const Chat = ({ matchId }) => {
   } = useTaskChat(matchId);
 
   // Offline state
-  const { isOnline } = useOfflineState();
+  const { isOnline } = useOffline();
 
   // Auto-assign conversation starter if none exists
   useEffect(() => {

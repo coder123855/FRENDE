@@ -1,0 +1,218 @@
+name: Continuous Monitoring
+
+on:
+  schedule:
+    # Run every 5 minutes
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  health-check-production:
+    name: Production Health Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check API health
+      run: |
+        echo "Checking production API health..."
+        response=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.PRODUCTION_API_URL }}/health)
+        if [ "$response" = "200" ]; then
+          echo "✅ Production API is healthy"
+        else
+          echo "❌ Production API health check failed: $response"
+          exit 1
+        fi
+        
+    - name: Check frontend accessibility
+      run: |
+        echo "Checking production frontend accessibility..."
+        response=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.PRODUCTION_FRONTEND_URL }})
+        if [ "$response" = "200" ]; then
+          echo "✅ Production frontend is accessible"
+        else
+          echo "❌ Production frontend accessibility check failed: $response"
+          exit 1
+        fi
+        
+    - name: Check database connectivity
+      run: |
+        echo "Checking database connectivity..."
+        # This would need to be implemented based on your database setup
+        echo "Database connectivity check would be implemented here"
+        
+    - name: Check WebSocket connectivity
+      run: |
+        echo "Checking WebSocket connectivity..."
+        # This would need to be implemented with a WebSocket client
+        echo "WebSocket connectivity check would be implemented here"
+
+  health-check-staging:
+    name: Staging Health Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check API health
+      run: |
+        echo "Checking staging API health..."
+        response=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.STAGING_API_URL }}/health)
+        if [ "$response" = "200" ]; then
+          echo "✅ Staging API is healthy"
+        else
+          echo "❌ Staging API health check failed: $response"
+          exit 1
+        fi
+        
+    - name: Check frontend accessibility
+      run: |
+        echo "Checking staging frontend accessibility..."
+        response=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.STAGING_FRONTEND_URL }})
+        if [ "$response" = "200" ]; then
+          echo "✅ Staging frontend is accessible"
+        else
+          echo "❌ Staging frontend accessibility check failed: $response"
+          exit 1
+        fi
+
+  performance-monitoring:
+    name: Performance Monitoring
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        
+    - name: Install Playwright
+      run: npx playwright install --with-deps
+      
+    - name: Run performance tests
+      env:
+        PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+        PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+      run: |
+        echo "Running performance tests..."
+        
+        # Measure API response time
+        echo "Measuring API response time..."
+        start_time=$(date +%s%N)
+        curl -s ${{ secrets.PRODUCTION_API_URL }}/health > /dev/null
+        end_time=$(date +%s%N)
+        response_time=$(( (end_time - start_time) / 1000000 ))
+        echo "API response time: ${response_time}ms"
+        
+        # Check if response time is within acceptable limits
+        if [ $response_time -gt 5000 ]; then
+          echo "❌ API response time too slow: ${response_time}ms"
+          exit 1
+        else
+          echo "✅ API response time acceptable: ${response_time}ms"
+        fi
+        
+        # Measure frontend load time
+        echo "Measuring frontend load time..."
+        start_time=$(date +%s%N)
+        curl -s ${{ secrets.PRODUCTION_FRONTEND_URL }} > /dev/null
+        end_time=$(date +%s%N)
+        load_time=$(( (end_time - start_time) / 1000000 ))
+        echo "Frontend load time: ${load_time}ms"
+        
+        # Check if load time is within acceptable limits
+        if [ $load_time -gt 10000 ]; then
+          echo "❌ Frontend load time too slow: ${load_time}ms"
+          exit 1
+        else
+          echo "✅ Frontend load time acceptable: ${load_time}ms"
+        fi
+
+  security-monitoring:
+    name: Security Monitoring
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check SSL certificate
+      run: |
+        echo "Checking SSL certificate validity..."
+        
+        # Check production frontend SSL
+        echo "Checking production frontend SSL..."
+        expiry_date=$(echo | openssl s_client -servername frende.app -connect frende.app:443 2>/dev/null | openssl x509 -noout -dates | grep notAfter | cut -d= -f2)
+        echo "SSL certificate expires: $expiry_date"
+        
+        # Check production API SSL
+        echo "Checking production API SSL..."
+        expiry_date=$(echo | openssl s_client -servername api.frende.app -connect api.frende.app:443 2>/dev/null | openssl x509 -noout -dates | grep notAfter | cut -d= -f2)
+        echo "SSL certificate expires: $expiry_date"
+        
+    - name: Check security headers
+      run: |
+        echo "Checking security headers..."
+        python scripts/security/security_audit.py --output security_monitoring_report.txt
+        
+        echo "Checking SSL certificates..."
+        python scripts/security/ssl_monitor.py --output ssl_monitoring_report.json
+        
+        echo "Security monitoring completed"
+
+  error-monitoring:
+    name: Error Monitoring
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check Sentry for recent errors
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+        SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+      run: |
+        echo "Checking Sentry for recent errors..."
+        
+        # Get error count for the last hour
+        error_count=$(curl -s -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
+          "https://sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/stats/" \
+          -d "stat=received" \
+          -d "resolution=1h" \
+          -d "since=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S)" \
+          -d "until=$(date -u +%Y-%m-%dT%H:%M:%S)" | \
+          jq '.[0][1] // 0')
+        
+        echo "Error count in the last hour: $error_count"
+        
+        # Alert if error count is too high
+        if [ "$error_count" -gt 100 ]; then
+          echo "❌ High error rate detected: $error_count errors in the last hour"
+          exit 1
+        else
+          echo "✅ Error rate acceptable: $error_count errors in the last hour"
+        fi
+
+  notification:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [health-check-production, health-check-staging, performance-monitoring, security-monitoring, error-monitoring]
+    if: always()
+    
+    steps:
+    - name: Check overall status
+      run: |
+        echo "Checking overall monitoring status..."
+        
+        # Check if any job failed
+        if [ "${{ needs.health-check-production.result }}" != "success" ] || \
+           [ "${{ needs.health-check-staging.result }}" != "success" ] || \
+           [ "${{ needs.performance-monitoring.result }}" != "success" ] || \
+           [ "${{ needs.security-monitoring.result }}" != "success" ] || \
+           [ "${{ needs.error-monitoring.result }}" != "success" ]; then
+          echo "❌ Some monitoring checks failed"
+          echo "Health Check Production: ${{ needs.health-check-production.result }}"
+          echo "Health Check Staging: ${{ needs.health-check-staging.result }}"
+          echo "Performance Monitoring: ${{ needs.performance-monitoring.result }}"
+          echo "Security Monitoring: ${{ needs.security-monitoring.result }}"
+          echo "Error Monitoring: ${{ needs.error-monitoring.result }}"
+          
+          # Send alert notification
+          echo "Sending alert notification..."
+          # This would integrate with your notification system (Slack, email, etc.)
+        else
+          echo "✅ All monitoring checks passed"
+        fi

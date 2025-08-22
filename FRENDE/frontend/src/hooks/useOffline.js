@@ -1,474 +1,379 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useOffline } from '../contexts/OfflineContext.jsx';
+import serviceWorkerManager from '../utils/serviceWorker';
+import offlineStorage from '../utils/offlineStorage';
 
-// Hook for offline state management
-export const useOfflineState = () => {
-  const { isOnline, syncInProgress, syncProgress, lastSync, error } = useOffline();
-  
-  return {
-    isOnline,
-    syncInProgress,
-    syncProgress,
-    lastSync,
-    error,
-    isOffline: !isOnline
-  };
-};
+export const useOffline = () => {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isServiceWorkerReady, setIsServiceWorkerReady] = useState(false);
+  const [offlineActions, setOfflineActions] = useState([]);
+  const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, completed, failed
+  const [storageStats, setStorageStats] = useState(null);
 
-// Hook for sync operations
-export const useSync = () => {
-  const { startSync, getSyncStatus } = useOffline();
-  const [syncStatus, setSyncStatus] = useState(getSyncStatus());
-
+  // Initialize offline functionality
   useEffect(() => {
-    const updateSyncStatus = () => {
-      setSyncStatus(getSyncStatus());
+    const initializeOffline = async () => {
+      try {
+        // Initialize offline storage
+        await offlineStorage.init();
+        
+        // Register service worker
+        const swRegistered = await serviceWorkerManager.register();
+        setIsServiceWorkerReady(swRegistered);
+
+        // Load initial data
+        await loadOfflineActions();
+        await loadStorageStats();
+
+        // Set up event listeners
+        serviceWorkerManager.addEventListener('updateAvailable', handleUpdateAvailable);
+        serviceWorkerManager.addEventListener('controllerChanged', handleControllerChanged);
+        serviceWorkerManager.addEventListener('syncCompleted', handleSyncCompleted);
+
+        console.log('Offline functionality initialized');
+      } catch (error) {
+        console.error('Failed to initialize offline functionality:', error);
+      }
     };
 
-    // Update status every second when sync is in progress
-    let interval;
-    if (syncStatus.syncInProgress) {
-      interval = setInterval(updateSyncStatus, 1000);
-    }
+    initializeOffline();
+
+    // Cleanup
+    return () => {
+      serviceWorkerManager.removeEventListener('updateAvailable', handleUpdateAvailable);
+      serviceWorkerManager.removeEventListener('controllerChanged', handleControllerChanged);
+      serviceWorkerManager.removeEventListener('syncCompleted', handleSyncCompleted);
+    };
+  }, []);
+
+  // Handle online/offline status changes
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      console.log('Connection restored');
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      console.log('Connection lost');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
     return () => {
-      if (interval) {
-        clearInterval(interval);
-      }
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
-  }, [syncStatus.syncInProgress, getSyncStatus]);
+  }, []);
 
-  const sync = useCallback(async () => {
+  // Load offline actions
+  const loadOfflineActions = useCallback(async () => {
     try {
-      await startSync();
-      setSyncStatus(getSyncStatus());
+      const actions = await offlineStorage.getPendingOfflineActions();
+      setOfflineActions(actions);
     } catch (error) {
-      console.error('Sync failed:', error);
+      console.error('Failed to load offline actions:', error);
+    }
+  }, []);
+
+  // Load storage statistics
+  const loadStorageStats = useCallback(async () => {
+    try {
+      const stats = await offlineStorage.getStorageStats();
+      setStorageStats(stats);
+    } catch (error) {
+      console.error('Failed to load storage stats:', error);
+    }
+  }, []);
+
+  // Handle service worker update available
+  const handleUpdateAvailable = useCallback(() => {
+    console.log('Service Worker update available');
+    // You can show a notification to the user here
+  }, []);
+
+  // Handle service worker controller change
+  const handleControllerChanged = useCallback(() => {
+    console.log('Service Worker controller changed');
+    setIsServiceWorkerReady(true);
+  }, []);
+
+  // Handle sync completed
+  const handleSyncCompleted = useCallback((data) => {
+    console.log('Sync completed:', data);
+    setSyncStatus('completed');
+    
+    // Reload offline actions after sync
+    setTimeout(() => {
+      loadOfflineActions();
+      loadStorageStats();
+    }, 1000);
+  }, [loadOfflineActions, loadStorageStats]);
+
+  // Store offline action
+  const storeOfflineAction = useCallback(async (action) => {
+    try {
+      const actionId = await offlineStorage.storeOfflineAction(action);
+      await loadOfflineActions();
+      await loadStorageStats();
+      
+      // Request background sync if online
+      if (isOnline) {
+        await serviceWorkerManager.requestBackgroundSync('background-sync');
+      }
+      
+      return actionId;
+    } catch (error) {
+      console.error('Failed to store offline action:', error);
       throw error;
     }
-  }, [startSync, getSyncStatus]);
+  }, [isOnline, loadOfflineActions, loadStorageStats]);
 
-  return {
-    sync,
-    syncStatus,
-    isOnline: syncStatus.isOnline,
-    syncInProgress: syncStatus.syncInProgress,
-    syncProgress: syncStatus.syncProgress,
-    lastSync: syncStatus.lastSync,
-    pendingActions: syncStatus.pendingActions,
-    pendingSyncItems: syncStatus.pendingSyncItems
-  };
-};
+  // Perform manual sync
+  const performSync = useCallback(async () => {
+    if (!isOnline) {
+      throw new Error('Cannot sync while offline');
+    }
 
-// Hook for offline tasks
-export const useOfflineTasks = () => {
-  const { 
-    getOfflineTasks, 
-    saveTaskOffline, 
-    isDataAvailableOffline,
-    startSync 
-  } = useOffline();
-  
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+    setSyncStatus('syncing');
 
-  useEffect(() => {
-    const loadTasks = () => {
-      try {
-        const offlineTasks = getOfflineTasks();
-        setTasks(offlineTasks);
-        setError(null);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+    try {
+      // Get pending actions
+      const pendingActions = await offlineStorage.getPendingOfflineActions();
+      
+      for (const action of pendingActions) {
+        try {
+          // Perform the action
+          const response = await fetch(action.url, {
+            method: action.method || 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${action.data.token}`
+            },
+            body: JSON.stringify(action.data)
+          });
+
+          if (response.ok) {
+            // Mark as completed
+            await offlineStorage.updateOfflineActionStatus(action.id, 'completed', await response.json());
+          } else {
+            // Mark as failed
+            await offlineStorage.updateOfflineActionStatus(action.id, 'failed', { error: response.statusText });
+          }
+        } catch (error) {
+          console.error('Failed to sync action:', action, error);
+          await offlineStorage.updateOfflineActionStatus(action.id, 'failed', { error: error.message });
+        }
       }
-    };
 
-    loadTasks();
-  }, [getOfflineTasks]);
+      setSyncStatus('completed');
+      await loadOfflineActions();
+      await loadStorageStats();
+    } catch (error) {
+      console.error('Sync failed:', error);
+      setSyncStatus('failed');
+      throw error;
+    }
+  }, [isOnline, loadOfflineActions, loadStorageStats]);
 
-  const saveTask = useCallback(async (task) => {
+  // Cache data
+  const cacheData = useCallback(async (key, data, type = 'general', ttl = 24 * 60 * 60 * 1000) => {
     try {
-      setLoading(true);
-      await saveTaskOffline(task);
-      const updatedTasks = getOfflineTasks();
-      setTasks(updatedTasks);
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
+      await offlineStorage.storeCachedData(key, data, type, ttl);
+      await loadStorageStats();
+    } catch (error) {
+      console.error('Failed to cache data:', error);
+      throw error;
     }
-  }, [saveTaskOffline, getOfflineTasks]);
+  }, [loadStorageStats]);
 
-  const refreshTasks = useCallback(async () => {
+  // Get cached data
+  const getCachedData = useCallback(async (key) => {
     try {
-      setLoading(true);
-      await startSync();
-      const updatedTasks = getOfflineTasks();
-      setTasks(updatedTasks);
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      return await offlineStorage.getCachedData(key);
+    } catch (error) {
+      console.error('Failed to get cached data:', error);
+      return null;
     }
-  }, [startSync, getOfflineTasks]);
+  }, []);
 
-  const hasOfflineTasks = isDataAvailableOffline('tasks');
-
-  return {
-    tasks,
-    loading,
-    error,
-    saveTask,
-    refreshTasks,
-    hasOfflineTasks
-  };
-};
-
-// Hook for offline messages
-export const useOfflineMessages = (roomId) => {
-  const { 
-    getOfflineMessages, 
-    saveMessageOffline, 
-    isDataAvailableOffline,
-    startSync 
-  } = useOffline();
-  
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    const loadMessages = () => {
-      try {
-        const offlineMessages = getOfflineMessages(roomId);
-        setMessages(offlineMessages);
-        setError(null);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (roomId) {
-      loadMessages();
-    }
-  }, [roomId, getOfflineMessages]);
-
-  const saveMessage = useCallback(async (message) => {
+  // Store user preference
+  const storeUserPreference = useCallback(async (key, value) => {
     try {
-      setLoading(true);
-      await saveMessageOffline(message);
-      const updatedMessages = getOfflineMessages(roomId);
-      setMessages(updatedMessages);
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
+      await offlineStorage.storeUserPreference(key, value);
+    } catch (error) {
+      console.error('Failed to store user preference:', error);
+      throw error;
     }
-  }, [saveMessageOffline, getOfflineMessages, roomId]);
+  }, []);
 
-  const refreshMessages = useCallback(async () => {
+  // Get user preference
+  const getUserPreference = useCallback(async (key) => {
     try {
-      setLoading(true);
-      await startSync();
-      const updatedMessages = getOfflineMessages(roomId);
-      setMessages(updatedMessages);
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      return await offlineStorage.getUserPreference(key);
+    } catch (error) {
+      console.error('Failed to get user preference:', error);
+      return null;
     }
-  }, [startSync, getOfflineMessages, roomId]);
+  }, []);
 
-  const hasOfflineMessages = isDataAvailableOffline('messages');
-
-  return {
-    messages,
-    loading,
-    error,
-    saveMessage,
-    refreshMessages,
-    hasOfflineMessages
-  };
-};
-
-// Hook for offline chat rooms
-export const useOfflineChatRooms = () => {
-  const { 
-    getOfflineChatRooms, 
-    isDataAvailableOffline,
-    startSync 
-  } = useOffline();
-  
-  const [chatRooms, setChatRooms] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    const loadChatRooms = () => {
-      try {
-        const offlineChatRooms = getOfflineChatRooms();
-        setChatRooms(offlineChatRooms);
-        setError(null);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadChatRooms();
-  }, [getOfflineChatRooms]);
-
-  const refreshChatRooms = useCallback(async () => {
+  // Store chat message offline
+  const storeChatMessage = useCallback(async (message) => {
     try {
-      setLoading(true);
-      await startSync();
-      const updatedChatRooms = getOfflineChatRooms();
-      setChatRooms(updatedChatRooms);
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      await offlineStorage.storeChatMessage(message);
+      await loadStorageStats();
+    } catch (error) {
+      console.error('Failed to store chat message:', error);
+      throw error;
     }
-  }, [startSync, getOfflineChatRooms]);
+  }, [loadStorageStats]);
 
-  const hasOfflineChatRooms = isDataAvailableOffline('chatRooms');
-
-  return {
-    chatRooms,
-    loading,
-    error,
-    refreshChatRooms,
-    hasOfflineChatRooms
-  };
-};
-
-// Hook for offline actions
-export const useOfflineActions = () => {
-  const { 
-    offlineActions, 
-    addOfflineAction, 
-    updateOfflineAction, 
-    removeOfflineAction 
-  } = useOffline();
-  
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const addAction = useCallback(async (action) => {
+  // Get offline chat history
+  const getOfflineChatHistory = useCallback(async (matchId) => {
     try {
-      setLoading(true);
-      setError(null);
-      const actionId = await addOfflineAction(action);
-      return actionId;
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
+      return await offlineStorage.getChatHistory(matchId);
+    } catch (error) {
+      console.error('Failed to get offline chat history:', error);
+      return [];
     }
-  }, [addOfflineAction]);
+  }, []);
 
-  const updateAction = useCallback(async (actionId, updates) => {
+  // Store task offline
+  const storeTask = useCallback(async (task) => {
     try {
-      setLoading(true);
-      setError(null);
-      await updateOfflineAction(actionId, updates);
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
+      await offlineStorage.storeTask(task);
+      await loadStorageStats();
+    } catch (error) {
+      console.error('Failed to store task:', error);
+      throw error;
     }
-  }, [updateOfflineAction]);
+  }, [loadStorageStats]);
 
-  const removeAction = useCallback(async (actionId) => {
+  // Get offline tasks
+  const getOfflineTasks = useCallback(async (status = null) => {
     try {
-      setLoading(true);
-      setError(null);
-      await removeOfflineAction(actionId);
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
+      return await offlineStorage.getTasks(status);
+    } catch (error) {
+      console.error('Failed to get offline tasks:', error);
+      return [];
     }
-  }, [removeOfflineAction]);
+  }, []);
 
-  const pendingActions = offlineActions.filter(action => action.status === 'pending');
-  const completedActions = offlineActions.filter(action => action.status === 'completed');
-  const failedActions = offlineActions.filter(action => action.status === 'failed');
-
-  return {
-    actions: offlineActions,
-    pendingActions,
-    completedActions,
-    failedActions,
-    loading,
-    error,
-    addAction,
-    updateAction,
-    removeAction
-  };
-};
-
-// Hook for offline data management
-export const useOfflineDataManagement = () => {
-  const { 
-    clearAllOfflineData, 
-    exportOfflineData, 
-    importOfflineData,
-    databaseSize 
-  } = useOffline();
-  
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const clearData = useCallback(async () => {
+  // Clear all offline data
+  const clearAllOfflineData = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
-      await clearAllOfflineData();
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
+      await offlineStorage.clearAll();
+      await loadOfflineActions();
+      await loadStorageStats();
+    } catch (error) {
+      console.error('Failed to clear offline data:', error);
+      throw error;
     }
-  }, [clearAllOfflineData]);
+  }, [loadOfflineActions, loadStorageStats]);
 
-  const exportData = useCallback(async () => {
+  // Update service worker
+  const updateServiceWorker = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
-      const data = await exportOfflineData();
-      return data;
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
+      await serviceWorkerManager.update();
+    } catch (error) {
+      console.error('Failed to update service worker:', error);
+      throw error;
     }
-  }, [exportOfflineData]);
+  }, []);
 
-  const importData = useCallback(async (data) => {
+  // Skip waiting and reload
+  const skipWaiting = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
-      await importOfflineData(data);
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
+      await serviceWorkerManager.skipWaiting();
+    } catch (error) {
+      console.error('Failed to skip waiting:', error);
+      throw error;
     }
-  }, [importOfflineData]);
+  }, []);
 
-  return {
-    databaseSize,
-    loading,
-    error,
-    clearData,
-    exportData,
-    importData
-  };
-};
+  // Request notification permission
+  const requestNotificationPermission = useCallback(async () => {
+    try {
+      return await serviceWorkerManager.requestNotificationPermission();
+    } catch (error) {
+      console.error('Failed to request notification permission:', error);
+      return false;
+    }
+  }, []);
 
-// Hook for network status
-export const useNetworkStatus = () => {
-  const { isOnline } = useOffline();
-  const [connectionType, setConnectionType] = useState('unknown');
+  // Subscribe to push notifications
+  const subscribeToPushNotifications = useCallback(async (vapidPublicKey) => {
+    try {
+      return await serviceWorkerManager.subscribeToPushNotifications(vapidPublicKey);
+    } catch (error) {
+      console.error('Failed to subscribe to push notifications:', error);
+      return false;
+    }
+  }, []);
 
-  useEffect(() => {
-    const updateConnectionType = () => {
-      if ('connection' in navigator) {
-        setConnectionType(navigator.connection.effectiveType || 'unknown');
-      }
-    };
+  // Get service worker status
+  const getServiceWorkerStatus = useCallback(() => {
+    return serviceWorkerManager.getStatus();
+  }, []);
 
-    updateConnectionType();
-    
-    if ('connection' in navigator) {
-      navigator.connection.addEventListener('change', updateConnectionType);
-      return () => {
-        navigator.connection.removeEventListener('change', updateConnectionType);
-      };
+  // Check if service worker is controlling
+  const isServiceWorkerControlling = useCallback(() => {
+    return serviceWorkerManager.isControlling();
+  }, []);
+
+  // Get cache status
+  const getCacheStatus = useCallback(async () => {
+    try {
+      return await serviceWorkerManager.getCacheStatus();
+    } catch (error) {
+      console.error('Failed to get cache status:', error);
+      return { available: false };
+    }
+  }, []);
+
+  // Clear all caches
+  const clearAllCaches = useCallback(async () => {
+    try {
+      return await serviceWorkerManager.clearAllCaches();
+    } catch (error) {
+      console.error('Failed to clear caches:', error);
+      return false;
     }
   }, []);
 
   return {
+    // Status
     isOnline,
-    isOffline: !isOnline,
-    connectionType,
-    isSlowConnection: connectionType === 'slow-2g' || connectionType === '2g'
+    isServiceWorkerReady,
+    syncStatus,
+    storageStats,
+    offlineActions,
+
+    // Actions
+    storeOfflineAction,
+    performSync,
+    cacheData,
+    getCachedData,
+    storeUserPreference,
+    getUserPreference,
+    storeChatMessage,
+    getOfflineChatHistory,
+    storeTask,
+    getOfflineTasks,
+    clearAllOfflineData,
+
+    // Service Worker
+    updateServiceWorker,
+    skipWaiting,
+    requestNotificationPermission,
+    subscribeToPushNotifications,
+    getServiceWorkerStatus,
+    isServiceWorkerControlling,
+    getCacheStatus,
+    clearAllCaches,
+
+    // Utilities
+    loadOfflineActions,
+    loadStorageStats
   };
-};
-
-// Hook for offline availability check
-export const useOfflineAvailability = (dataType, id = null) => {
-  const { isDataAvailableOffline } = useOffline();
-  
-  const isAvailable = isDataAvailableOffline(dataType, id);
-  
-  return {
-    isAvailable,
-    isNotAvailable: !isAvailable
-  };
-};
-
-// Hook for sync with retry
-export const useSyncWithRetry = (maxRetries = 3) => {
-  const { sync, syncStatus } = useSync();
-  const [retryCount, setRetryCount] = useState(0);
-  const [lastError, setLastError] = useState(null);
-
-  const syncWithRetry = useCallback(async () => {
-    let attempts = 0;
-    
-    while (attempts < maxRetries) {
-      try {
-        setLastError(null);
-        await sync();
-        setRetryCount(0);
-        return;
-      } catch (error) {
-        attempts++;
-        setRetryCount(attempts);
-        setLastError(error.message);
-        
-        if (attempts < maxRetries) {
-          // Wait before retrying (exponential backoff)
-          const delay = Math.pow(2, attempts) * 1000;
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-    
-    throw new Error(`Sync failed after ${maxRetries} attempts`);
-  }, [sync, maxRetries]);
-
-  return {
-    syncWithRetry,
-    retryCount,
-    lastError,
-    hasRetriesLeft: retryCount < maxRetries,
-    syncStatus
-  };
-};
-
-// Export all hooks
-export {
-  useOffline
 };

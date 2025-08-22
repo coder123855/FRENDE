@@ -17,6 +17,7 @@ from core.exceptions import (
     WebSocketError, ConfigurationError, AIError, FileUploadError, MatchError, TaskError
 )
 from core.logging_config import get_logger, log_error
+from core.sentry import capture_exception, set_request_context
 
 logger = get_logger("error")
 
@@ -55,6 +56,21 @@ async def handle_frende_exception(request: Request, exc: FrendeException) -> JSO
     # Get request ID from request state
     request_id = getattr(request.state, "request_id", None)
     user_id = getattr(request.state, "user_id", None)
+    
+    # Set request context for Sentry
+    set_request_context(
+        request_id=request_id,
+        path=request.url.path,
+        method=request.method,
+        user_id=user_id,
+    )
+    
+    # Capture exception in Sentry
+    capture_exception(exc, {
+        "exception_type": type(exc).__name__,
+        "error_code": exc.error_code,
+        "status_code": exc.status_code,
+    })
     
     # Log the error with context
     log_error(

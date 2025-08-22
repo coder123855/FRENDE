@@ -14,7 +14,7 @@ from core.database import get_async_session
 from services.chat import chat_service
 from services.tasks import task_service
 from services.task_submission import task_submission_service
-from services.coin_rewards import coin_rewards_service
+from services.coin_rewards import coin_reward_service
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +219,7 @@ class TaskChatIntegrationService:
             # Award coins to both users
             reward_results = []
             for user_id in [task.match.user1_id, task.match.user2_id]:
-                reward_result = await coin_rewards_service.award_coins_to_users(
+                reward_result = await coin_reward_service.award_coins_to_users(
                     [user_id], 
                     task.reward_coins, 
                     f"Task completion: {task.title}",

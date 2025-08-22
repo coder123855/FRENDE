@@ -1,106 +1,58 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.ext.asyncio import AsyncSession
 import uvicorn
-import logging
-from contextlib import asynccontextmanager
+import os
+from typing import Optional
 
-from core.config import settings
-from core.logging_config import configure_logging
-from core.middleware import setup_middleware
-from core.websocket import setup_websocket
-from core.database import engine, Base
+# Import core modules
+from core.config import configure_logging, settings
+from core.database import get_async_session, engine, Base
+from core.auth import current_active_user
+from core.middleware import create_middleware_stack
 
 # Import API routers
-from api import auth, users, matches, tasks, chat, queue, conversation_starter, match_requests, coin_rewards, automatic_greeting, task_chat, task_submissions
-from api.health import router as health_router
-from api.metrics import router as metrics_router
-from api.monitoring_dashboard import router as monitoring_router
+from api import auth, users, matches, tasks, chat, websocket
+from api import conversation_starter, automatic_greeting, coin_rewards
+from api import monitoring, health, rate_limiting, asset_performance, task_chat
 
-# Import monitoring components
-from core.ai_health_check import ai_health_checker
-from core.websocket_monitor import websocket_monitor
-from core.external_service_monitor import external_service_monitor
-from api.metrics import MetricsMiddleware
+# Import models for database initialization
+from models.user import User
+from models.match import Match
+from models.task import Task
+from models.chat import ChatMessage
 
 # Configure logging
 configure_logging()
-logger = logging.getLogger(__name__)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
-    # Startup
-    logger.info("Starting Frende Backend Application...")
-    
-    # Create database tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    # Initialize monitoring components
-    if settings.PERFORMANCE_MONITORING_ENABLED:
-        logger.info("Performance monitoring initialized")
-    
-    # Start background monitoring tasks
-    import asyncio
-    asyncio.create_task(ai_health_checker.run_continuous_monitoring())
-    asyncio.create_task(websocket_monitor.run_continuous_monitoring())
-    asyncio.create_task(external_service_monitor.run_continuous_monitoring())
-    
-    logger.info("Frende Backend Application started successfully")
-    
-    yield
-    
-    # Shutdown
-    logger.info("Shutting down Frende Backend Application...")
 
 # Create FastAPI app
 app = FastAPI(
     title="Frende Backend API",
     description="AI-powered social media app for making new friends",
     version="1.0.0",
-    lifespan=lifespan
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
-# Setup middleware
-setup_middleware(app)
-
-# Add metrics middleware
-app.add_middleware(MetricsMiddleware)
-
-# Setup CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.get_cors_origins(),
-    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
-    allow_methods=settings.get_cors_methods(),
-    allow_headers=settings.get_cors_headers(),
-)
-
-# Setup WebSocket
-setup_websocket(app)
-
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Security
+security = HTTPBearer()
 
 # Include API routers
-app.include_router(auth.router, prefix="/api/v1")
-app.include_router(users.router, prefix="/api/v1")
-app.include_router(matches.router, prefix="/api/v1")
-app.include_router(tasks.router, prefix="/api/v1")
-app.include_router(chat.router, prefix="/api/v1")
-app.include_router(queue.router, prefix="/api/v1")
-app.include_router(conversation_starter.router, prefix="/api/v1")
-app.include_router(match_requests.router, prefix="/api/v1")
-app.include_router(coin_rewards.router, prefix="/api/v1")
-app.include_router(automatic_greeting.router, prefix="/api/v1")
-app.include_router(task_chat.router, prefix="/api/v1")
-app.include_router(task_submissions.router, prefix="/api/v1")
-
-# Include monitoring routers
-app.include_router(health_router, prefix="/api/v1")
-app.include_router(metrics_router, prefix="/api/v1")
-app.include_router(monitoring_router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+app.include_router(users.router, prefix="/users", tags=["Users"])
+app.include_router(matches.router, prefix="/matches", tags=["Matches"])
+app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
+app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
+app.include_router(conversation_starter.router, prefix="/conversation-starter", tags=["Conversation Starter"])
+app.include_router(automatic_greeting.router, prefix="/automatic-greeting", tags=["Automatic Greeting"])
+app.include_router(coin_rewards.router, prefix="/coins", tags=["Coin Rewards"])
+app.include_router(monitoring.router, prefix="/monitoring", tags=["Monitoring"])
+app.include_router(health.router, prefix="/health", tags=["Health"])
+app.include_router(rate_limiting.router, prefix="/rate-limiting", tags=["Rate Limiting"])
+app.include_router(asset_performance.router, prefix="/assets", tags=["Asset Performance"])
+app.include_router(task_chat.router, prefix="/task-chat", tags=["Task Chat"])
 
 @app.get("/")
 async def root():
@@ -108,35 +60,72 @@ async def root():
     return {
         "message": "Welcome to Frende Backend API",
         "version": "1.0.0",
-        "environment": settings.ENVIRONMENT,
-        "docs": "/docs",
-        "health": "/api/v1/health",
-        "metrics": "/api/v1/metrics"
+        "status": "running",
+        "docs": "/docs"
     }
 
-@app.get("/api/v1")
-async def api_root():
-    """API root endpoint"""
+@app.get("/api/status")
+async def api_status():
+    """API status endpoint"""
     return {
-        "message": "Frende Backend API v1.0.0",
-        "endpoints": {
-            "auth": "/api/v1/auth",
-            "users": "/api/v1/users",
-            "matches": "/api/v1/matches",
-            "tasks": "/api/v1/tasks",
-            "chat": "/api/v1/chat",
-            "health": "/api/v1/health",
-            "metrics": "/api/v1/metrics",
-            "monitoring": "/api/v1/monitoring"
-        },
-        "documentation": "/docs"
+        "status": "healthy",
+        "version": "1.0.0",
+        "environment": settings.ENVIRONMENT
     }
+
+@app.get("/protected")
+async def protected_route(current_user: User = Depends(current_active_user)):
+    """Protected route example"""
+    return {
+        "message": "This is a protected route",
+        "user_id": current_user.id,
+        "username": current_user.username
+    }
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup event handler"""
+    # Create database tables
+    async with engine.begin() as conn:
+        # Import all models to ensure they're registered
+        from models import user, match, task, chat
+        
+        # Create tables
+        await conn.run_sync(Base.metadata.create_all)
+    
+    print("🚀 Frende Backend API started successfully!")
+    print(f"📚 API Documentation: http://localhost:8000/docs")
+    print(f"🔧 Environment: {settings.ENVIRONMENT}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Shutdown event handler"""
+    print("🛑 Frende Backend API shutting down...")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# Setup custom middleware stack last
+app = create_middleware_stack(app)
 
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
     ) 

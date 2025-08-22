@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
+import OptimizedAvatar from './ui/OptimizedAvatar';
 import { Badge } from './ui/badge';
 import { CheckCircle, XCircle, Trash2, MessageCircle, Heart, Clock, AlertTriangle } from 'lucide-react';
 import ExpirationTimer from './ExpirationTimer';
@@ -81,12 +81,12 @@ const MatchStatusCard = ({
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <Avatar className="h-12 w-12">
-              <AvatarImage src={otherUser.profile_picture} />
-              <AvatarFallback>
-                {otherUser.name?.charAt(0) || 'U'}
-              </AvatarFallback>
-            </Avatar>
+            <OptimizedAvatar
+              src={otherUser.profile_picture_url}
+              name={otherUser.name}
+              size="md"
+              className="h-12 w-12"
+            />
             <div>
               <CardTitle className="text-lg">{otherUser.name || 'Unknown User'}</CardTitle>
               <div className="flex items-center gap-2 mt-1">

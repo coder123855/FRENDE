@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import apiClient from '../lib/apiClient';
+import { authAPI } from '../lib/api';
 import tokenManager from '../lib/tokenManager';
 
 const AuthContext = createContext();
@@ -46,21 +46,50 @@ export const AuthProvider = ({ children }) => {
             setLoading(true);
             setError(null);
 
-            // Check if we have valid tokens
-            const authStatus = await apiClient.getAuthStatus();
-            setTokenInfo(authStatus.tokenInfo);
+            console.log('AuthContext: Initializing authentication...');
 
-            if (authStatus.isAuthenticated) {
+            // Check if we have valid tokens
+            const tokenInfo = tokenManager.getTokenInfo();
+            console.log('AuthContext: Token info:', tokenInfo);
+            setTokenInfo(tokenInfo);
+
+            if (tokenInfo && tokenInfo.accessToken) {
+                console.log('AuthContext: Found access token, fetching user data...');
                 // Fetch current user data
-                const userData = await apiClient.get('/auth/me');
-                setUser(userData);
-                setIsAuthenticated(true);
+                try {
+                    const userData = await authAPI.me();
+                    console.log('AuthContext: User data response:', userData);
+                    
+                    // Handle different response formats
+                    let user = null;
+                    if (userData.data && userData.data.user) {
+                        user = userData.data.user;
+                    } else if (userData.data) {
+                        user = userData.data;
+                    } else if (userData.user) {
+                        user = userData.user;
+                    } else {
+                        user = userData;
+                    }
+                    
+                    console.log('AuthContext: Extracted user data:', user);
+                    setUser(user);
+                    setIsAuthenticated(true);
+                    console.log('AuthContext: User authenticated successfully');
+                } catch (userError) {
+                    console.error('AuthContext: Error fetching user data:', userError);
+                    setError('Failed to fetch user data');
+                    setUser(null);
+                    setIsAuthenticated(false);
+                    await tokenManager.clearTokens();
+                }
             } else {
+                console.log('AuthContext: No valid tokens found');
                 setUser(null);
                 setIsAuthenticated(false);
             }
         } catch (error) {
-            console.error('Auth initialization error:', error);
+            console.error('AuthContext: Auth initialization error:', error);
             setError('Failed to initialize authentication');
             setUser(null);
             setIsAuthenticated(false);
@@ -77,24 +106,51 @@ export const AuthProvider = ({ children }) => {
             setLoading(true);
             setError(null);
 
-            const response = await apiClient.post('/auth/login', credentials);
+            console.log('AuthContext: Attempting login...');
+
+            const response = await authAPI.login(credentials);
+            console.log('AuthContext: Login response:', response);
+            
+            // Handle different response formats
+            let tokens = null;
+            let userData = null;
+            
+            if (response.data) {
+                tokens = {
+                    access_token: response.data.access_token,
+                    refresh_token: response.data.refresh_token,
+                    session_id: response.data.session_id
+                };
+                userData = response.data.user;
+            } else if (response.access_token) {
+                tokens = {
+                    access_token: response.access_token,
+                    refresh_token: response.refresh_token,
+                    session_id: response.session_id
+                };
+                userData = response.user;
+            }
             
             // Store tokens securely
-            if (response.access_token && response.refresh_token) {
+            if (tokens && tokens.access_token && tokens.refresh_token) {
+                console.log('AuthContext: Storing tokens...');
                 tokenManager.storeTokens(
-                    response.access_token,
-                    response.refresh_token,
-                    response.session_id
+                    tokens.access_token,
+                    tokens.refresh_token,
+                    tokens.session_id
                 );
+            } else {
+                console.error('AuthContext: No tokens found in response');
             }
 
-            setUser(response.user);
+            console.log('AuthContext: Setting user data:', userData);
+            setUser(userData);
             setIsAuthenticated(true);
             setTokenInfo(tokenManager.getTokenInfo());
 
             return response;
         } catch (error) {
-            console.error('Login error:', error);
+            console.error('AuthContext: Login error:', error);
             setError(error.response?.data?.detail || 'Login failed');
             throw error;
         } finally {
@@ -107,18 +163,18 @@ export const AuthProvider = ({ children }) => {
             setLoading(true);
             setError(null);
 
-            const response = await apiClient.post('/auth/register', userData);
+            const response = await authAPI.register(userData);
             
             // Auto-login after successful registration
-            if (response.access_token && response.refresh_token) {
+            if (response.data.access_token && response.data.refresh_token) {
                 tokenManager.storeTokens(
-                    response.access_token,
-                    response.refresh_token,
-                    response.session_id
+                    response.data.access_token,
+                    response.data.refresh_token,
+                    response.data.session_id
                 );
             }
 
-            setUser(response.user);
+            setUser(response.data.user);
             setIsAuthenticated(true);
             setTokenInfo(tokenManager.getTokenInfo());
 
@@ -137,7 +193,7 @@ export const AuthProvider = ({ children }) => {
             setLoading(true);
             
             // Call logout endpoint and clear tokens
-            await apiClient.logout();
+            await authAPI.logout();
             
             setUser(null);
             setIsAuthenticated(false);
@@ -172,9 +228,20 @@ export const AuthProvider = ({ children }) => {
             setLoading(true);
             setError(null);
 
-            const response = await apiClient.put('/auth/profile', profileData);
-            setUser(response);
-            return response;
+            const response = await authAPI.updateProfile(profileData);
+            
+            // Handle different response formats
+            let userData = null;
+            if (response.data) {
+                userData = response.data;
+            } else if (response.user) {
+                userData = response.user;
+            } else {
+                userData = response;
+            }
+            
+            setUser(userData);
+            return userData;
         } catch (error) {
             console.error('Profile update error:', error);
             setError(error.response?.data?.detail || 'Profile update failed');
@@ -189,7 +256,7 @@ export const AuthProvider = ({ children }) => {
             setLoading(true);
             setError(null);
 
-            const response = await apiClient.post('/auth/change-password', passwordData);
+            const response = await authAPI.changePassword(passwordData);
             return response;
         } catch (error) {
             console.error('Password change error:', error);
@@ -202,7 +269,7 @@ export const AuthProvider = ({ children }) => {
 
     const getUserSessions = useCallback(async () => {
         try {
-            const response = await apiClient.get('/auth/sessions');
+            const response = await authAPI.getUserSessions();
             return response;
         } catch (error) {
             console.error('Get sessions error:', error);
@@ -212,7 +279,7 @@ export const AuthProvider = ({ children }) => {
 
     const revokeSession = useCallback(async (sessionId) => {
         try {
-            const response = await apiClient.delete(`/auth/sessions/${sessionId}`);
+            const response = await authAPI.revokeSession(sessionId);
             return response;
         } catch (error) {
             console.error('Revoke session error:', error);
@@ -222,7 +289,7 @@ export const AuthProvider = ({ children }) => {
 
     const revokeAllSessions = useCallback(async () => {
         try {
-            const response = await apiClient.delete('/auth/sessions');
+            const response = await authAPI.revokeAllSessions();
             return response;
         } catch (error) {
             console.error('Revoke all sessions error:', error);

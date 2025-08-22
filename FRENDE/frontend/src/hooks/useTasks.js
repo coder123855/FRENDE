@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { taskApi, TaskApiError } from '../lib/taskApi';
-import { useOfflineTasks, useOfflineState } from './useOffline.js';
+import { useOffline } from './useOffline';
 import { useCachedData } from './useCache.js';
 import { getTTL } from '../config/cacheConfig.js';
 
@@ -19,14 +19,12 @@ export const useTasks = (matchId, userId) => {
   
   const abortControllerRef = useRef(null);
 
-  // Offline hooks
-  const { isOnline } = useOfflineState();
+  // Offline functionality
   const { 
-    tasks: offlineTasks, 
-    saveTask: saveTaskOffline, 
-    hasOfflineTasks,
-    refreshTasks: refreshOfflineTasks 
-  } = useOfflineTasks();
+    isOnline, 
+    storeTask, 
+    getOfflineTasks 
+  } = useOffline();
 
   // Cache-aware data fetching for tasks
   const {

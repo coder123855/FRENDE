@@ -3,7 +3,8 @@ import asyncio
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_, update
+from sqlalchemy import select, func, and_, or_, update, desc
+from sqlalchemy.orm import selectinload, joinedload
 from uuid import uuid4
 from models.chat import ChatMessage, ChatRoom
 from models.match import Match
@@ -12,6 +13,7 @@ from models.task import Task
 from core.websocket import manager
 from core.database import get_async_session
 from core.config import settings
+from core.performance_monitor import performance_monitor
 from services.task_submission import task_submission_service
 
 logger = logging.getLogger(__name__)
@@ -37,26 +39,26 @@ class ChatService:
         
         return await self._create_chat_room_internal(match, session)
     
-    async def _create_chat_room_internal(self, match: Match, session: AsyncSession) -> ChatRoom:
-        """Internal method to create a chat room"""
-        room_id = f"room_{uuid4().hex[:8]}"
-        
-        chat_room = ChatRoom(
-            room_id=room_id,
-            match_id=match.id,
-            conversation_starter_id=match.user1_id  # Default to user1 as starter
-        )
-        
-        session.add(chat_room)
-        await session.commit()
-        await session.refresh(chat_room)
-        
-        # Update match with chat room ID
-        match.chat_room_id = room_id
-        await session.commit()
-        
-        logger.info(f"Created chat room {room_id} for match {match.id}")
-        return chat_room
+    async def _create_chat_room_internal(
+        self,
+        match: Match,
+        session: AsyncSession
+    ) -> ChatRoom:
+        """Internal method to create chat room"""
+        async with performance_monitor("create_chat_room", user_id=match.user1_id):
+            room_id = f"match_{match.id}_{uuid4().hex[:8]}"
+            
+            chat_room = ChatRoom(
+                room_id=room_id,
+                match_id=match.id,
+                is_active=True
+            )
+            
+            session.add(chat_room)
+            await session.commit()
+            await session.refresh(chat_room)
+            
+            return chat_room
     
     async def get_chat_room(self, match_id: int, session: AsyncSession) -> Optional[ChatRoom]:
         """Get chat room for a match"""
@@ -172,51 +174,56 @@ class ChatService:
         message_text: str,
         message_type: str = "text",
         task_id: Optional[int] = None,
-        is_system_message: bool = False,
-        metadata: Optional[Dict[str, Any]] = None,
         session: AsyncSession = None
     ) -> ChatMessage:
         """Send a message in a chat room"""
         if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
+            async with get_async_session() as session:
+                return await self._send_message_internal(match_id, sender_id, message_text, message_type, task_id, session)
         
-        chat_message = ChatMessage(
-            match_id=match_id,
-            sender_id=sender_id,
-            message_text=message_text,
-            message_type=message_type,
-            task_id=task_id,
-            is_system_message=is_system_message,
-            metadata=metadata
-        )
-        
-        session.add(chat_message)
-        await session.commit()
-        await session.refresh(chat_message)
-        
-        # Broadcast message via WebSocket
-        broadcast_message = {
-            "type": "chat_message",
-            "message": {
-                "id": chat_message.id,
-                "match_id": match_id,
-                "sender_id": sender_id,
-                "message_text": message_text,
-                "message_type": message_type,
-                "task_id": task_id,
-                "is_system_message": is_system_message,
-                "metadata": metadata,
-                "created_at": chat_message.created_at.isoformat(),
-                "is_read": chat_message.is_read,
-            }
-        }
-        
-        await manager.broadcast_to_match(broadcast_message, match_id)
-        
-        logger.info(f"Message sent in match {match_id} by user {sender_id}")
-        return chat_message
+        return await self._send_message_internal(match_id, sender_id, message_text, message_type, task_id, session)
+    
+    async def _send_message_internal(
+        self,
+        match_id: int,
+        sender_id: int,
+        message_text: str,
+        message_type: str = "text",
+        task_id: Optional[int] = None,
+        session: AsyncSession = None
+    ) -> ChatMessage:
+        """Internal method to send message with optimized query"""
+        async with performance_monitor("send_message", user_id=sender_id):
+            # Validate message length
+            if len(message_text) > self.max_message_length:
+                raise ValueError(f"Message too long. Maximum length is {self.max_message_length} characters")
+            
+            # Create message with optimized query
+            message = ChatMessage(
+                match_id=match_id,
+                sender_id=sender_id,
+                message_text=message_text,
+                message_type=message_type,
+                task_id=task_id,
+                is_read=False,
+                is_system_message=message_type == "system"
+            )
+            
+            session.add(message)
+            await session.commit()
+            await session.refresh(message)
+            
+            # Load sender information with eager loading
+            await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.id == message.id)
+                .options(selectinload(ChatMessage.sender))
+            )
+            
+            # Emit to WebSocket
+            await self._emit_message_to_room(match_id, message)
+            
+            return message
     
     async def send_system_message(
         self,
@@ -353,20 +360,34 @@ class ChatService:
         self,
         match_id: int,
         user_id: int,
-        session: AsyncSession
+        session: AsyncSession = None
     ) -> int:
         """Get count of unread messages for a user in a match"""
-        result = await session.execute(
-            select(ChatMessage).where(
-                and_(
-                    ChatMessage.match_id == match_id,
-                    ChatMessage.sender_id != user_id,
-                    ChatMessage.is_read == False
+        if not session:
+            async with get_async_session() as session:
+                return await self._get_unread_count_internal(match_id, user_id, session)
+        
+        return await self._get_unread_count_internal(match_id, user_id, session)
+    
+    async def _get_unread_count_internal(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession
+    ) -> int:
+        """Internal method to get unread count with optimized query"""
+        async with performance_monitor("get_unread_count", user_id=user_id):
+            result = await session.execute(
+                select(func.count(ChatMessage.id))
+                .where(
+                    and_(
+                        ChatMessage.match_id == match_id,
+                        ChatMessage.sender_id != user_id,
+                        ChatMessage.is_read == False
+                    )
                 )
             )
-        )
-        messages = result.scalars().all()
-        return len(messages)
+            return result.scalar() or 0
     
     async def send_task_notification(
         self,
@@ -510,128 +531,102 @@ class ChatService:
             raise
     
     async def get_chat_history(
-        self, 
-        match_id: int, 
-        user_id: int, 
+        self,
+        match_id: int,
         limit: int = 50,
+        offset: int = 0,
+        include_system: bool = False,
         session: AsyncSession = None
-    ) -> List[Dict[str, Any]]:
-        """Get chat history for a match"""
+    ) -> List[ChatMessage]:
+        """Get chat history with optimized query and eager loading"""
         if not session:
             async with get_async_session() as session:
-                return await self._get_chat_history_internal(match_id, user_id, limit, session)
+                return await self._get_chat_history_internal(match_id, session, limit, offset, include_system)
         
-        return await self._get_chat_history_internal(match_id, user_id, limit, session)
+        return await self._get_chat_history_internal(match_id, session, limit, offset, include_system)
     
     async def _get_chat_history_internal(
-        self, 
-        match_id: int, 
-        user_id: int, 
-        limit: int,
-        session: AsyncSession
-    ) -> List[Dict[str, Any]]:
-        """Internal method to get chat history"""
-        try:
-            # Validate user is in match
-            result = await session.execute(
-                select(Match).where(
-                    Match.id == match_id,
-                    (Match.user1_id == user_id) | (Match.user2_id == user_id)
-                )
-            )
-            match = result.scalar_one_or_none()
-            
-            if not match:
-                raise ValueError("User not authorized for this match")
-            
-            # Get chat messages
-            result = await session.execute(
+        self,
+        match_id: int,
+        session: AsyncSession,
+        limit: int = 50,
+        offset: int = 0,
+        include_system: bool = False
+    ) -> List[ChatMessage]:
+        """Internal method to get chat history with optimized query"""
+        async with performance_monitor("get_chat_history", user_id=None):
+            # Build optimized query using indexes
+            query = (
                 select(ChatMessage)
                 .where(ChatMessage.match_id == match_id)
-                .order_by(ChatMessage.created_at.desc())
+                .options(
+                    selectinload(ChatMessage.sender),
+                    selectinload(ChatMessage.task)
+                )
+                .order_by(desc(ChatMessage.created_at))
+                .offset(offset)
                 .limit(limit)
             )
+            
+            if not include_system:
+                query = query.where(ChatMessage.is_system_message == False)
+            
+            result = await session.execute(query)
             messages = result.scalars().all()
             
-            # Convert to dict format
-            chat_history = []
-            for message in reversed(messages):  # Reverse to get chronological order
-                chat_history.append({
-                    "id": message.id,
-                    "match_id": message.match_id,
-                    "sender_id": message.sender_id,
-                    "message_text": message.message_text,
-                    "message_type": message.message_type,
-                    "created_at": message.created_at.isoformat(),
-                    "is_read": message.is_read,
-                    "read_at": message.read_at.isoformat() if message.read_at else None,
-                    "is_system_message": message.is_system_message,
-                    "task_id": message.task_id,
-                    "metadata": message.metadata,
-                })
-            
-            return chat_history
+            # Reverse to get chronological order
+            return list(reversed(messages))
+    
     async def get_chat_history_paginated(
         self,
         match_id: int,
         user_id: int,
         page: int = 1,
         size: int = 50,
-        include_system: bool = True,
+        include_system: bool = False,
         session: AsyncSession = None
     ) -> Dict[str, Any]:
-        """Get chat history with offset pagination"""
+        """Get paginated chat history with optimized query"""
         if not session:
             async with get_async_session() as session:
                 return await self._get_chat_history_paginated_internal(match_id, user_id, page, size, include_system, session)
+        
         return await self._get_chat_history_paginated_internal(match_id, user_id, page, size, include_system, session)
-
-    async def _get_chat_history_paginated_internal(self, match_id: int, user_id: int, page: int, size: int, include_system: bool, session: AsyncSession) -> Dict[str, Any]:
-        # Validate user
-        result = await session.execute(
-            select(Match).where(
-                Match.id == match_id,
-                (Match.user1_id == user_id) | (Match.user2_id == user_id)
-            )
-        )
-        match = result.scalar_one_or_none()
-        if not match:
-            raise ValueError("User not authorized for this match")
-
-        offset = (page - 1) * size
-        base_query = select(ChatMessage).where(ChatMessage.match_id == match_id)
-        if not include_system:
-            base_query = base_query.where(ChatMessage.is_system_message == False)
-
-        count_result = await session.execute(select(func.count(ChatMessage.id)).select_from(base_query.subquery()))
-        total = count_result.scalar() or 0
-
-        result = await session.execute(
-            base_query.order_by(ChatMessage.created_at.desc()).offset(offset).limit(size)
-        )
-        rows = list(reversed(result.scalars().all()))
-        messages = [
-            {
-                "id": m.id,
-                "match_id": m.match_id,
-                "sender_id": m.sender_id,
-                "message_text": m.message_text,
-                "message_type": m.message_type,
-                "created_at": m.created_at.isoformat(),
-                "is_read": m.is_read,
-                "read_at": m.read_at.isoformat() if m.read_at else None,
-                "is_system_message": m.is_system_message,
-                "task_id": m.task_id,
-                "metadata": m.metadata,
+    
+    async def _get_chat_history_paginated_internal(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession,
+        page: int = 1,
+        size: int = 50,
+        include_system: bool = False
+    ) -> Dict[str, Any]:
+        """Internal method to get paginated chat history with optimized query"""
+        async with performance_monitor("get_chat_history_paginated", user_id=user_id):
+            offset = (page - 1) * size
+            
+            # Get total count with optimized query
+            count_query = select(func.count(ChatMessage.id)).where(ChatMessage.match_id == match_id)
+            if not include_system:
+                count_query = count_query.where(ChatMessage.is_system_message == False)
+            
+            result = await session.execute(count_query)
+            total = result.scalar()
+            
+            # Get messages with eager loading
+            messages = await self._get_chat_history_internal(match_id, session, size, offset, include_system)
+            
+            return {
+                "messages": messages,
+                "page": page,
+                "size": size,
+                "total": total,
+                "has_more": offset + size < total,
+                "next_cursor": f"page_{page + 1}" if offset + size < total else None,
+                "prev_cursor": f"page_{page - 1}" if page > 1 else None
             }
-            for m in rows
-        ]
-
-        has_more = page * size < total
-        next_cursor = rows[0].created_at.isoformat() if rows else None
-        prev_cursor = rows[-1].created_at.isoformat() if rows else None
-        return {"messages": messages, "page": page, "size": size, "total": total, "has_more": has_more, "next_cursor": next_cursor, "prev_cursor": prev_cursor}
-
+    
     async def get_chat_history_cursor(
         self,
         match_id: int,
@@ -649,82 +644,8 @@ class ChatService:
         return await self._get_chat_history_cursor_internal(match_id, user_id, cursor, size, direction, include_system, session)
 
     async def _get_chat_history_cursor_internal(self, match_id: int, user_id: int, cursor: Optional[datetime], size: int, direction: str, include_system: bool, session: AsyncSession) -> Dict[str, Any]:
-        # Validate user
-        result = await session.execute(
-            select(Match).where(
-                Match.id == match_id,
-                (Match.user1_id == user_id) | (Match.user2_id == user_id)
-            )
-        )
-        match = result.scalar_one_or_none()
-        if not match:
-            raise ValueError("User not authorized for this match")
-
-        base_query = select(ChatMessage).where(ChatMessage.match_id == match_id)
-        if not include_system:
-            base_query = base_query.where(ChatMessage.is_system_message == False)
-
-        if cursor:
-            if direction == "older":
-                base_query = base_query.where(ChatMessage.created_at < cursor)
-            else:
-                base_query = base_query.where(ChatMessage.created_at > cursor)
-
-        result = await session.execute(
-            base_query.order_by(ChatMessage.created_at.desc()).limit(size)
-        )
-        rows = list(reversed(result.scalars().all()))
-
-        messages = [
-            {
-                "id": m.id,
-                "match_id": m.match_id,
-                "sender_id": m.sender_id,
-                "message_text": m.message_text,
-                "message_type": m.message_type,
-                "created_at": m.created_at.isoformat(),
-                "is_read": m.is_read,
-                "read_at": m.read_at.isoformat() if m.read_at else None,
-                "is_system_message": m.is_system_message,
-                "task_id": m.task_id,
-                "metadata": m.metadata,
-            }
-            for m in rows
-        ]
-
-        has_more = len(rows) == size
-        next_cursor = rows[0].created_at.isoformat() if rows else None
-        prev_cursor = rows[-1].created_at.isoformat() if rows else None
-        return {"messages": messages, "size": size, "has_more": has_more, "next_cursor": next_cursor, "prev_cursor": prev_cursor}
-            
-        except Exception as e:
-            logger.error(f"Error getting chat history: {str(e)}")
-            raise
-    
-    async def mark_messages_as_read(
-        self, 
-        match_id: int, 
-        user_id: int, 
-        message_ids: List[int],
-        session: AsyncSession = None
-    ) -> bool:
-        """Mark messages as read"""
-        if not session:
-            async with get_async_session() as session:
-                return await self._mark_messages_as_read_internal(match_id, user_id, message_ids, session)
-        
-        return await self._mark_messages_as_read_internal(match_id, user_id, message_ids, session)
-    
-    async def _mark_messages_as_read_internal(
-        self, 
-        match_id: int, 
-        user_id: int, 
-        message_ids: List[int],
-        session: AsyncSession
-    ) -> bool:
-        """Internal method to mark messages as read"""
         try:
-            # Validate user is in match
+            # Validate user
             result = await session.execute(
                 select(Match).where(
                     Match.id == match_id,
@@ -732,17 +653,82 @@ class ChatService:
                 )
             )
             match = result.scalar_one_or_none()
-            
             if not match:
                 raise ValueError("User not authorized for this match")
+
+            base_query = select(ChatMessage).where(ChatMessage.match_id == match_id)
+            if not include_system:
+                base_query = base_query.where(ChatMessage.is_system_message == False)
+
+            if cursor:
+                if direction == "older":
+                    base_query = base_query.where(ChatMessage.created_at < cursor)
+                else:
+                    base_query = base_query.where(ChatMessage.created_at > cursor)
+
+            result = await session.execute(
+                base_query.order_by(ChatMessage.created_at.desc()).limit(size)
+            )
+            rows = list(reversed(result.scalars().all()))
+
+            messages = [
+                {
+                    "id": m.id,
+                    "match_id": m.match_id,
+                    "sender_id": m.sender_id,
+                    "message_text": m.message_text,
+                    "message_type": m.message_type,
+                    "created_at": m.created_at.isoformat(),
+                    "is_read": m.is_read,
+                    "read_at": m.read_at.isoformat() if m.read_at else None,
+                    "is_system_message": m.is_system_message,
+                    "task_id": m.task_id,
+                    "metadata": m.metadata,
+                }
+                for m in rows
+            ]
+
+            has_more = len(rows) == size
+            next_cursor = rows[0].created_at.isoformat() if rows else None
+            prev_cursor = rows[-1].created_at.isoformat() if rows else None
+            return {"messages": messages, "size": size, "has_more": has_more, "next_cursor": next_cursor, "prev_cursor": prev_cursor}
             
-            # Mark messages as read
-            await session.execute(
+        except Exception as e:
+            logger.error(f"Error getting chat history: {str(e)}")
+            raise
+    
+    async def mark_messages_as_read(
+        self,
+        match_id: int,
+        user_id: int,
+        message_ids: Optional[List[int]] = None,
+        session: AsyncSession = None
+    ) -> int:
+        """Mark messages as read with optimized query"""
+        if not session:
+            async with get_async_session() as session:
+                return await self._mark_messages_as_read_internal(match_id, user_id, message_ids, session)
+        
+        return await self._mark_messages_as_read_internal(match_id, user_id, message_ids, session)
+    
+    async def _mark_messages_as_read_internal(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession,
+        message_ids: Optional[List[int]] = None
+    ) -> int:
+        """Internal method to mark messages as read with optimized query"""
+        async with performance_monitor("mark_messages_as_read", user_id=user_id):
+            # Build optimized query using indexes
+            query = (
                 update(ChatMessage)
                 .where(
-                    ChatMessage.id.in_(message_ids),
-                    ChatMessage.match_id == match_id,
-                    ChatMessage.sender_id != user_id  # Can't mark own messages as read
+                    and_(
+                        ChatMessage.match_id == match_id,
+                        ChatMessage.sender_id != user_id,
+                        ChatMessage.is_read == False
+                    )
                 )
                 .values(
                     is_read=True,
@@ -750,13 +736,13 @@ class ChatService:
                 )
             )
             
-            await session.commit()
-            logger.info(f"Marked {len(message_ids)} messages as read by user {user_id}")
-            return True
+            if message_ids:
+                query = query.where(ChatMessage.id.in_(message_ids))
             
-        except Exception as e:
-            logger.error(f"Error marking messages as read: {str(e)}")
-            return False
+            result = await session.execute(query)
+            await session.commit()
+            
+            return result.rowcount
     
     async def get_typing_status(self, match_id: int, user_id: int, session: AsyncSession = None) -> List[int]:
         """Get typing status for a match"""
@@ -789,38 +775,46 @@ class ChatService:
             logger.error(f"Error getting typing status: {str(e)}")
             return []
     
-    async def validate_user_in_match(self, match_id: int, user_id: int, session: AsyncSession = None) -> bool:
-        """Validate that user is part of the specified match"""
+    async def validate_user_in_match(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession = None
+    ) -> bool:
+        """Validate user is in match with optimized query"""
         if not session:
             async with get_async_session() as session:
                 return await self._validate_user_in_match_internal(match_id, user_id, session)
         
         return await self._validate_user_in_match_internal(match_id, user_id, session)
     
-    async def _validate_user_in_match_internal(self, match_id: int, user_id: int, session: AsyncSession) -> bool:
-        """Internal method to validate user in match"""
-        try:
+    async def _validate_user_in_match_internal(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession
+    ) -> bool:
+        """Internal method to validate user in match with optimized query"""
+        async with performance_monitor("validate_user_in_match", user_id=user_id):
             result = await session.execute(
-                select(Match).where(
-                    Match.id == match_id,
-                    (Match.user1_id == user_id) | (Match.user2_id == user_id)
+                select(Match)
+                .where(
+                    and_(
+                        Match.id == match_id,
+                        or_(Match.user1_id == user_id, Match.user2_id == user_id)
+                    )
                 )
             )
-            match = result.scalar_one_or_none()
-            return match is not None
-            
-        except Exception as e:
-            logger.error(f"Error validating user in match: {str(e)}")
-            return False
+            return result.scalar_one_or_none() is not None
     
     async def submit_task_completion(
-        self, 
-        task_id: int, 
-        user_id: int, 
+        self,
+        task_id: int,
+        user_id: int,
         submission_data: Dict[str, Any],
         session: AsyncSession = None
     ) -> Any:
-        """Submit task completion via chat"""
+        """Submit task completion via chat with optimized query"""
         if not session:
             async with get_async_session() as session:
                 return await self._submit_task_completion_internal(task_id, user_id, submission_data, session)
@@ -828,25 +822,26 @@ class ChatService:
         return await self._submit_task_completion_internal(task_id, user_id, submission_data, session)
     
     async def _submit_task_completion_internal(
-        self, 
-        task_id: int, 
-        user_id: int, 
+        self,
+        task_id: int,
+        user_id: int,
         submission_data: Dict[str, Any],
         session: AsyncSession
     ) -> Any:
-        """Internal method to submit task completion"""
-        try:
-            # Use task submission service
-            submission = await task_submission_service.submit_task_completion(
-                task_id, user_id, submission_data, session
-            )
-            
-            logger.info(f"Task submission via chat: task {task_id}, user {user_id}")
-            return submission
-            
-        except Exception as e:
-            logger.error(f"Error submitting task via chat: {str(e)}")
-            raise
+        """Internal method to submit task completion with optimized query"""
+        async with performance_monitor("submit_task_completion", user_id=user_id):
+            try:
+                # Use task submission service with optimized query
+                submission = await task_submission_service.submit_task_completion(
+                    task_id, user_id, submission_data, session
+                )
+                
+                logger.info(f"Task submission via chat: task {task_id}, user {user_id}")
+                return submission
+                
+            except Exception as e:
+                logger.error(f"Error submitting task via chat: {str(e)}")
+                raise
 
 # Global chat service instance
 chat_service = ChatService() 

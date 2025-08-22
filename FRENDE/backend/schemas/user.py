@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -14,6 +14,14 @@ class UserBase(BaseModel):
     interests: Optional[str] = None
     age_preference_min: Optional[int] = None
     age_preference_max: Optional[int] = None
+
+    @validator('profile_text')
+    def validate_profile_text(cls, v):
+        if v is not None:
+            word_count = len(v.strip().split()) if v.strip() else 0
+            if word_count > 100:
+                raise ValueError('Profile text must be 100 words or less')
+        return v
 
 class UserCreate(UserBase):
     email: EmailStr

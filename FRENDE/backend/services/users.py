@@ -12,7 +12,7 @@ from schemas.user import UserUpdate
 from core.database import get_async_session
 from core.config import settings
 from core.exceptions import UserNotFoundError, InsufficientCoinsError
-from services.image_processing import image_processing_service
+from services.image_processing import image_processor
 from services.file_storage import file_storage_service
 
 logger = logging.getLogger(__name__)
@@ -155,15 +155,15 @@ class UserService:
             raise UserNotFoundError(f"User with ID {user_id} not found")
         
         # Validate image
-        is_valid, error_message = image_processing_service.validate_image(file_content, filename)
+        is_valid, error_message = image_processor.validate_image(file_content, filename)
         if not is_valid:
             raise ValueError(error_message)
         
         # Process image
-        processed_image = image_processing_service.process_profile_picture(file_content)
+        processed_image = image_processor.process_profile_picture(file_content)
         
         # Generate filename
-        new_filename = image_processing_service.generate_filename(user_id, filename)
+        new_filename = image_processor.generate_filename(user_id, filename)
         
         # Save to storage
         file_path = await file_storage_service.save_profile_picture(
@@ -443,9 +443,9 @@ class UserService:
                 break
         
         result = await session.execute(
-            select(Task).where(
+            select(Task).join(Match).where(
                 and_(
-                    or_(Task.user1_id == user_id, Task.user2_id == user_id),
+                    or_(Match.user1_id == user_id, Match.user2_id == user_id),
                     Task.is_completed == False
                 )
             )

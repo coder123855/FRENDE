@@ -17,7 +17,7 @@ from core.exceptions import (
     UserNotFoundError, InsufficientCoinsError, ValidationError
 )
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(tags=["users"])
 
 @router.get("/me", response_model=UserRead)
 async def get_current_user_profile(
@@ -192,6 +192,48 @@ async def get_slot_info(
         "slot_purchase_cost": user_service.slot_purchase_cost
     }
 
+@router.get("/compatible")
+async def get_compatible_users(
+    limit: int = Query(10, ge=1, le=20, description="Maximum number of results"),
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Get compatible users for matching"""
+    try:
+        compatible_users = await user_service.get_compatible_users(
+            current_user.id, limit, session
+        )
+        return {
+            "compatible_users": compatible_users,
+            "total": len(compatible_users)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error finding compatible users: {str(e)}"
+        )
+
+@router.get("/search")
+async def search_users(
+    query: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Search for users"""
+    try:
+        users = await user_service.search_users(query, current_user.id, session)
+        return {
+            "users": users[:limit],
+            "total": len(users),
+            "query": query
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error searching users: {str(e)}"
+        )
+
 @router.get("/{user_id}", response_model=UserRead)
 async def get_user_profile(
     user_id: int,
@@ -229,48 +271,6 @@ async def get_user_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving user profile: {str(e)}"
-        )
-
-@router.get("/search")
-async def search_users(
-    query: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
-    current_user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session)
-):
-    """Search for users"""
-    try:
-        users = await user_service.search_users(query, current_user.id, session)
-        return {
-            "users": users[:limit],
-            "total": len(users),
-            "query": query
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error searching users: {str(e)}"
-        )
-
-@router.get("/compatible")
-async def get_compatible_users(
-    limit: int = Query(10, ge=1, le=20, description="Maximum number of results"),
-    current_user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session)
-):
-    """Get compatible users for matching"""
-    try:
-        compatible_users = await user_service.get_compatible_users(
-            current_user.id, limit, session
-        )
-        return {
-            "compatible_users": compatible_users,
-            "total": len(compatible_users)
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error finding compatible users: {str(e)}"
         )
 
 @router.get("/me/matches/{match_id}")

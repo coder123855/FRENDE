@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Button } from './ui/button';
+import imageOptimizer from '../utils/imageOptimization';
+import imagePerformanceMonitor from '../utils/imagePerformance';
 
 const ImageUpload = ({ 
   onImageUpload, 
@@ -15,18 +17,14 @@ const ImageUpload = ({
   const fileInputRef = useRef(null);
 
   const validateFile = (file) => {
-    const maxSize = 30 * 1024 * 1024; // 30MB
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    const validation = imageOptimizer.validateImage(file, {
+      maxSize: 30 * 1024 * 1024, // 30MB
+      allowedTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'],
+      maxWidth: 4096,
+      maxHeight: 4096
+    });
     
-    if (!allowedTypes.includes(file.type)) {
-      return 'Please select a JPEG or PNG image file.';
-    }
-    
-    if (file.size > maxSize) {
-      return 'File size must be less than 30MB.';
-    }
-    
-    return null;
+    return validation.valid ? null : validation.error;
   };
 
   const handleFileSelect = async (file) => {
@@ -38,18 +36,29 @@ const ImageUpload = ({
       return;
     }
 
-    // Create preview
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPreview(e.target.result);
-    };
-    reader.readAsDataURL(file);
-
-    // Upload file
-    setUploading(true);
+    // Get image dimensions and generate preview
     try {
+      const dimensions = await imageOptimizer.getImageDimensions(file);
+      console.log('Image dimensions:', dimensions);
+      
+      // Create optimized preview
+      const optimizedFile = await imageOptimizer.compressImage(file, {
+        maxWidth: 800,
+        maxHeight: 800,
+        quality: 0.8,
+        format: imageOptimizer.getOptimalFormat()
+      });
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setPreview(e.target.result);
+      };
+      reader.readAsDataURL(optimizedFile);
+
+      // Upload optimized file
+      setUploading(true);
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', optimizedFile);
       
       const response = await fetch('/api/users/me/profile-picture', {
         method: 'POST',
@@ -65,11 +74,23 @@ const ImageUpload = ({
       }
 
       const userData = await response.json();
+      
+      // Track upload performance
+      imagePerformanceMonitor.trackImageLoad(
+        userData.profile_picture_url, 
+        0, // Upload time not tracked here
+        optimizedFile.size,
+        optimizedFile.type.split('/')[1]
+      );
+      
       onImageUpload(userData.profile_picture_url);
       setPreview(null); // Clear preview after successful upload
     } catch (err) {
       setError(err.message);
       setPreview(null);
+      
+      // Track error
+      imagePerformanceMonitor.trackImageError(file.name, err.message);
     } finally {
       setUploading(false);
     }

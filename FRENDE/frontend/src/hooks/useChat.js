@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSocket } from './useSocket';
 import { useAuth } from './useAuth';
-import { useOfflineMessages, useOfflineState } from './useOffline.js';
+import { useOffline } from './useOffline';
 import { useOptimisticUpdate } from './useOptimisticUpdate';
 
 export const useChat = (matchId) => {
@@ -24,14 +24,12 @@ export const useChat = (matchId) => {
     const typingTimeoutRef = useRef(null);
     const lastMessageRef = useRef(null);
 
-    // Offline hooks
-    const { isOnline } = useOfflineState();
+    // Offline functionality
     const { 
-        messages: offlineMessages, 
-        saveMessage: saveMessageOffline, 
-        hasOfflineMessages,
-        refreshMessages: refreshOfflineMessages 
-    } = useOfflineMessages(matchId);
+        isOnline, 
+        storeChatMessage, 
+        getOfflineChatHistory 
+    } = useOffline();
 
     // Initialize chat connection
     useEffect(() => {

@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 import logging
 
 from core.database import get_async_session
-from core.auth import get_current_user
+from core.auth import current_active_user
 from models.user import User
 from services.chat import chat_service
 from schemas.chat import (
@@ -27,7 +27,7 @@ async def get_chat_history(
     limit: int = 50,
     page: int = 1,
     include_system: bool = False,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get chat history for a match"""
@@ -45,6 +45,18 @@ async def get_chat_history(
             next_cursor=page_data["next_cursor"],
             prev_cursor=page_data["prev_cursor"],
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error getting chat history: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve chat history"
+        )
+
 @router.get("/{match_id}/history/cursor", response_model=ChatHistoryPage)
 async def get_chat_history_cursor(
     match_id: int,
@@ -52,7 +64,7 @@ async def get_chat_history_cursor(
     direction: str = "older",
     limit: int = 50,
     include_system: bool = False,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get chat history using cursor pagination"""
@@ -86,7 +98,7 @@ async def get_chat_history_cursor(
 @router.get("/{match_id}/status", response_model=ChatRoomStatus)
 async def get_chat_status(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get chat room online and typing status"""
@@ -108,7 +120,7 @@ async def get_chat_status(
 @router.get("/{match_id}/unread-count")
 async def get_unread_count(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get unread message count for a match"""
@@ -137,7 +149,7 @@ async def get_unread_count(
 async def send_message(
     match_id: int,
     message_request: ChatMessageRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Send a message to a match"""
@@ -175,7 +187,7 @@ async def send_message(
 async def mark_messages_as_read(
     match_id: int,
     read_request: MessageReadRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Mark messages as read"""
@@ -206,7 +218,7 @@ async def mark_messages_as_read(
 @router.get("/{match_id}/typing", response_model=TypingStatusResponse)
 async def get_typing_status(
     match_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get typing status for a match"""
@@ -233,7 +245,7 @@ async def react_to_message(
     match_id: int,
     message_id: int,
     reaction: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """React to a message (future feature)"""
@@ -247,7 +259,7 @@ async def react_to_message(
 async def delete_message(
     match_id: int,
     message_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Delete a message (future feature)"""

@@ -3,12 +3,14 @@ import random
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, desc
+from sqlalchemy.orm import selectinload, joinedload
 from models.user import User
 from models.match import Match
 from core.database import get_async_session
 from core.config import settings
 from core.exceptions import UserNotFoundError, MatchNotFoundError, NoAvailableSlotsError, MatchNotPendingError
+from core.performance_monitor import performance_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -42,29 +44,233 @@ class MatchingService:
         target_user_id: Optional[int] = None,
         session: AsyncSession = None
     ) -> Match:
-        """Internal method to create match request"""
-        # Check if user has available slots
-        result = await session.execute(
-            select(User).where(User.id == user_id)
-        )
-        user = result.scalar_one_or_none()
-        
-        if not user or user.available_slots <= 0:
-            raise NoAvailableSlotsError(f"User {user_id} has no available slots for matching")
-        
-        if target_user_id:
-            # Direct match with specific user
-            return await self._create_direct_match(user_id, target_user_id, session)
-        else:
-            # Find compatible user from queue
-            compatible_user_id = await self._find_compatible_user(user_id, session=session)
-            if not compatible_user_id:
-                # Add to queue and wait
-                if user_id not in self.matching_queue:
-                    self.matching_queue.append(user_id)
-                raise NoAvailableSlotsError("No compatible users available. Added to matching queue.")
+        """Internal method to create match request with optimized queries"""
+        async with performance_monitor("create_match_request", user_id=user_id):
+            # Get user with eager loading to avoid N+1 queries
+            result = await session.execute(
+                select(User).where(User.id == user_id)
+                .options(selectinload(User.refresh_tokens))
+            )
+            user = result.scalar_one_or_none()
             
-            return await self._create_direct_match(user_id, compatible_user_id, session)
+            if not user:
+                raise UserNotFoundError(f"User {user_id} not found")
+            
+            # Check available slots with optimized query
+            if user.available_slots <= 0:
+                raise NoAvailableSlotsError("No available slots")
+            
+            # If target user specified, create direct match
+            if target_user_id:
+                return await self._create_direct_match(user_id, target_user_id, session)
+            
+            # Find compatible users with optimized query
+            compatible_users = await self._find_compatible_users_optimized(user, session)
+            
+            if not compatible_users:
+                # Add to queue if no compatible users found
+                await self._add_to_queue(user_id, session)
+                raise NoAvailableSlotsError("No compatible users found, added to queue")
+            
+            # Select best match
+            best_match = compatible_users[0]
+            return await self._create_match_with_user(user_id, best_match.id, session)
+    
+    async def _find_compatible_users_optimized(
+        self, 
+        user: User, 
+        session: AsyncSession
+    ) -> List[User]:
+        """Find compatible users with optimized query and eager loading"""
+        async with performance_monitor("find_compatible_users", user_id=user.id):
+            # Build optimized query with proper indexes
+            query = (
+                select(User)
+                .where(
+                    and_(
+                        User.id != user.id,
+                        User.is_active == True,
+                        User.available_slots > 0,
+                        # Age compatibility check
+                        or_(
+                            and_(
+                                User.age >= user.age_preference_min,
+                                User.age <= user.age_preference_max
+                            ),
+                            user.age_preference_min.is_(None),
+                            user.age_preference_max.is_(None)
+                        ),
+                        # User's age within target's preference
+                        or_(
+                            and_(
+                                user.age >= User.age_preference_min,
+                                user.age <= User.age_preference_max
+                            ),
+                            User.age_preference_min.is_(None),
+                            User.age_preference_max.is_(None)
+                        )
+                    )
+                )
+                .options(selectinload(User.refresh_tokens))
+                .order_by(desc(User.created_at))
+                .limit(50)  # Limit for performance
+            )
+            
+            result = await session.execute(query)
+            potential_matches = result.scalars().all()
+            
+            # Calculate compatibility scores with caching
+            scored_matches = []
+            for potential_match in potential_matches:
+                score = await self._calculate_compatibility_score_cached(user, potential_match)
+                if score >= self.min_compatibility_threshold:
+                    scored_matches.append((potential_match, score))
+            
+            # Sort by compatibility score and return top matches
+            scored_matches.sort(key=lambda x: x[1], reverse=True)
+            return [user for user, score in scored_matches[:10]]
+    
+    async def _calculate_compatibility_score_cached(
+        self, 
+        user1: User, 
+        user2: User
+    ) -> int:
+        """Calculate compatibility score with caching"""
+        cache_key = f"{min(user1.id, user2.id)}_{max(user1.id, user2.id)}"
+        
+        if cache_key in self.compatibility_cache:
+            return self.compatibility_cache[cache_key]
+        
+        score = await self._calculate_compatibility_score(user1, user2)
+        self.compatibility_cache[cache_key] = score
+        
+        # Limit cache size
+        if len(self.compatibility_cache) > 1000:
+            # Remove oldest entries
+            keys_to_remove = list(self.compatibility_cache.keys())[:100]
+            for key in keys_to_remove:
+                del self.compatibility_cache[key]
+        
+        return score
+    
+    async def _calculate_compatibility_score(self, user1: User, user2: User) -> int:
+        """Calculate compatibility score between two users"""
+        score = 0
+        
+        # Age compatibility (30 points)
+        if user1.age and user2.age:
+            age_diff = abs(user1.age - user2.age)
+            if age_diff <= 2:
+                score += 30
+            elif age_diff <= 5:
+                score += 20
+            elif age_diff <= 10:
+                score += 10
+        
+        # Community compatibility (25 points)
+        if user1.community and user2.community and user1.community == user2.community:
+            score += 25
+        
+        # Location compatibility (25 points)
+        if user1.location and user2.location and user1.location == user2.location:
+            score += 25
+        
+        # Interest compatibility (20 points)
+        if user1.interests and user2.interests:
+            # Simple keyword matching (could be enhanced with AI)
+            interests1 = user1.interests.lower().split()
+            interests2 = user2.interests.lower().split()
+            common_interests = set(interests1) & set(interests2)
+            if common_interests:
+                score += min(20, len(common_interests) * 5)
+        
+        return min(score, self.max_compatibility_score)
+    
+    async def get_user_matches(
+        self,
+        user_id: int,
+        status: Optional[str] = None,
+        limit: int = 10,
+        offset: int = 0,
+        session: AsyncSession = None
+    ) -> List[Match]:
+        """Get user's matches with optimized query and eager loading"""
+        if not session:
+            async with get_async_session() as session:
+                return await self._get_user_matches_internal(user_id, status, limit, offset, session)
+        
+        return await self._get_user_matches_internal(user_id, status, limit, offset, session)
+    
+    async def _get_user_matches_internal(
+        self,
+        user_id: int,
+        status: Optional[str] = None,
+        limit: int = 10,
+        offset: int = 0,
+        session: AsyncSession = None
+    ) -> List[Match]:
+        """Internal method to get user matches with optimized query"""
+        async with performance_monitor("get_user_matches", user_id=user_id):
+            # Build optimized query using indexes
+            query = (
+                select(Match)
+                .where(
+                    or_(Match.user1_id == user_id, Match.user2_id == user_id)
+                )
+                .options(
+                    selectinload(Match.user1),
+                    selectinload(Match.user2),
+                    selectinload(Match.tasks),
+                    selectinload(Match.messages)
+                )
+                .order_by(desc(Match.created_at))
+                .offset(offset)
+                .limit(limit)
+            )
+            
+            if status:
+                query = query.where(Match.status == status)
+            
+            result = await session.execute(query)
+            return result.scalars().all()
+    
+    async def get_match_details(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession = None
+    ) -> Optional[Match]:
+        """Get match details with optimized query and eager loading"""
+        if not session:
+            async with get_async_session() as session:
+                return await self._get_match_details_internal(match_id, user_id, session)
+        
+        return await self._get_match_details_internal(match_id, user_id, session)
+    
+    async def _get_match_details_internal(
+        self,
+        match_id: int,
+        user_id: int,
+        session: AsyncSession
+    ) -> Optional[Match]:
+        """Internal method to get match details with optimized query"""
+        async with performance_monitor("get_match_details", user_id=user_id):
+            result = await session.execute(
+                select(Match)
+                .where(
+                    and_(
+                        Match.id == match_id,
+                        or_(Match.user1_id == user_id, Match.user2_id == user_id)
+                    )
+                )
+                .options(
+                    selectinload(Match.user1),
+                    selectinload(Match.user2),
+                    selectinload(Match.tasks),
+                    selectinload(Match.messages)
+                )
+            )
+            return result.scalar_one_or_none()
     
     async def _create_direct_match(
         self,
@@ -73,413 +279,76 @@ class MatchingService:
         session: AsyncSession
     ) -> Match:
         """Create a direct match between two users"""
-        # Get both users
-        result = await session.execute(
-            select(User).where(User.id.in_([user1_id, user2_id]))
-        )
-        users = result.scalars().all()
-        
-        if len(users) != 2:
-            raise UserNotFoundError("One or both users not found or inactive")
-        
-        # Create match
-        match = Match(
-            user1_id=user1_id,
-            user2_id=user2_id,
-            status="pending",
-            created_at=datetime.utcnow()
-        )
-        
-        session.add(match)
-        await session.commit()
-        await session.refresh(match)
-        
-        # Use slot for both users
-        for user in users:
-            user.available_slots -= 1
-            user.total_slots_used += 1
-        
-        await session.commit()
-        
-        logger.info(f"Created direct match {match.id} between users {user1_id} and {user2_id}")
-        return match
-    
-    async def _create_queue_match(
-        self,
-        user_id: int,
-        community: Optional[str] = None,
-        location: Optional[str] = None,
-        session: AsyncSession = None
-    ) -> Match:
-        """Create a match using the matching queue"""
-        # Add user to matching queue
-        if user_id not in self.matching_queue:
-            self.matching_queue.append(user_id)
-        
-        # Find compatible user in queue
-        compatible_user = await self._find_compatible_user(user_id, community, location, session)
-        
-        if compatible_user:
-            # Remove both users from queue
-            self.matching_queue.remove(user_id)
-            self.matching_queue.remove(compatible_user)
+        async with performance_monitor("create_direct_match", user_id=user1_id):
+            # Check if match already exists
+            existing_match = await session.execute(
+                select(Match).where(
+                    or_(
+                        and_(Match.user1_id == user1_id, Match.user2_id == user2_id),
+                        and_(Match.user1_id == user2_id, Match.user2_id == user1_id)
+                    )
+                )
+            )
             
-            # Create match
-            return await self._create_direct_match(user_id, compatible_user, session)
-        else:
-            # No compatible user found, return None (user stays in queue)
-            return None
-    
-    async def _find_compatible_user(
-        self,
-        user_id: int,
-        community: Optional[str] = None,
-        location: Optional[str] = None,
-        session: AsyncSession = None
-    ) -> Optional[int]:
-        """Find a compatible user from the queue"""
-        if not session:
-            async with get_async_session() as session:
-                return await self._find_compatible_user_internal(user_id, community, location, session)
-        
-        return await self._find_compatible_user_internal(user_id, community, location, session)
-
-    async def _find_compatible_user_internal(
-        self,
-        user_id: int,
-        community: Optional[str] = None,
-        location: Optional[str] = None,
-        session: AsyncSession = None
-    ) -> Optional[int]:
-        """Find a compatible user from the queue"""
-        if not session:
-            async for db_session in get_async_session():
-                session = db_session
-                break
-        
-        # Get user preferences
-        result = await session.execute(
-            select(User).where(User.id == user_id)
-        )
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            return None
-        
-        # Find users in queue with similar preferences
-        for queue_user_id in self.matching_queue:
-            if queue_user_id == user_id:
-                continue
+            if existing_match.scalar_one_or_none():
+                raise ValueError("Match already exists")
             
-            # Check if users are compatible
-            compatibility_result = await self._calculate_compatibility(user_id, queue_user_id, session)
+            # Create new match
+            match = Match(
+                user1_id=user1_id,
+                user2_id=user2_id,
+                status="pending",
+                expires_at=datetime.utcnow() + timedelta(days=2)
+            )
             
-            if compatibility_result["score"] >= self.min_compatibility_threshold:  # Minimum compatibility threshold
-                return queue_user_id
-        
-        return None
+            session.add(match)
+            await session.commit()
+            await session.refresh(match)
+            
+            return match
     
-    async def _calculate_compatibility(
+    async def _create_match_with_user(
         self,
         user1_id: int,
         user2_id: int,
         session: AsyncSession
-    ) -> Dict[str, Any]:
-        """Calculate compatibility score between two users with detailed factors"""
-        cache_key = f"{min(user1_id, user2_id)}_{max(user1_id, user2_id)}"
-        
-        if cache_key in self.compatibility_cache:
-            return self.compatibility_cache[cache_key]
-        
-        # Get user profiles
-        result = await session.execute(
-            select(User).where(User.id.in_([user1_id, user2_id]))
-        )
-        users = result.scalars().all()
-        
-        if len(users) != 2:
-            return {"score": 0, "factors": {}, "details": "One or both users not found"}
-        
-        user1, user2 = users
-        
-        # Initialize factors tracking
-        factors = {
-            "age_compatibility": {"score": 0, "weight": 0.30, "details": ""},
-            "community_compatibility": {"score": 0, "weight": 0.25, "details": ""},
-            "location_compatibility": {"score": 0, "weight": 0.20, "details": ""},
-            "interest_compatibility": {"score": 0, "weight": 0.15, "details": ""},
-            "profile_compatibility": {"score": 0, "weight": 0.10, "details": ""}
-        }
-        
-        # Age compatibility (30% weight)
-        if user1.age and user2.age:
-            age_diff = abs(user1.age - user2.age)
-            if age_diff <= 2:
-                factors["age_compatibility"]["score"] = 100
-                factors["age_compatibility"]["details"] = f"Very similar age (difference: {age_diff} years)"
-            elif age_diff <= 5:
-                factors["age_compatibility"]["score"] = 75
-                factors["age_compatibility"]["details"] = f"Similar age (difference: {age_diff} years)"
-            elif age_diff <= 10:
-                factors["age_compatibility"]["score"] = 50
-                factors["age_compatibility"]["details"] = f"Moderate age difference (difference: {age_diff} years)"
-            elif age_diff <= 15:
-                factors["age_compatibility"]["score"] = 25
-                factors["age_compatibility"]["details"] = f"Significant age difference (difference: {age_diff} years)"
-            else:
-                factors["age_compatibility"]["score"] = 0
-                factors["age_compatibility"]["details"] = f"Large age difference (difference: {age_diff} years)"
-        else:
-            factors["age_compatibility"]["details"] = "Age information not available"
-        
-        # Community compatibility (25% weight)
-        if user1.community and user2.community:
-            if user1.community == user2.community:
-                factors["community_compatibility"]["score"] = 100
-                factors["community_compatibility"]["details"] = f"Same community: {user1.community}"
-            else:
-                factors["community_compatibility"]["score"] = 0
-                factors["community_compatibility"]["details"] = f"Different communities: {user1.community} vs {user2.community}"
-        else:
-            factors["community_compatibility"]["details"] = "Community information not available"
-        
-        # Location compatibility (20% weight)
-        if user1.location and user2.location:
-            if user1.location == user2.location:
-                factors["location_compatibility"]["score"] = 100
-                factors["location_compatibility"]["details"] = f"Same location: {user1.location}"
-            else:
-                factors["location_compatibility"]["score"] = 0
-                factors["location_compatibility"]["details"] = f"Different locations: {user1.location} vs {user2.location}"
-        else:
-            factors["location_compatibility"]["details"] = "Location information not available"
-        
-        # Interest compatibility (15% weight) - based on profile text keywords
-        if user1.profile_text and user2.profile_text:
-            text1_lower = user1.profile_text.lower()
-            text2_lower = user2.profile_text.lower()
-            
-            # Extract common interests/keywords
-            words1 = set(text1_lower.split())
-            words2 = set(text2_lower.split())
-            common_words = words1.intersection(words2)
-            
-            if len(common_words) > 0:
-                interest_score = min(len(common_words) * 20, 100)
-                factors["interest_compatibility"]["score"] = interest_score
-                factors["interest_compatibility"]["details"] = f"Shared interests: {', '.join(list(common_words)[:5])}"
-            else:
-                factors["interest_compatibility"]["details"] = "No shared interests detected"
-        else:
-            factors["interest_compatibility"]["details"] = "Profile text not available"
-        
-        # Profile text compatibility (10% weight)
-        if user1.profession and user2.profession:
-            prof1_lower = user1.profession.lower()
-            prof2_lower = user2.profession.lower()
-            
-            if prof1_lower == prof2_lower:
-                factors["profile_compatibility"]["score"] = 100
-                factors["profile_compatibility"]["details"] = f"Same profession: {user1.profession}"
-            elif any(word in prof2_lower for word in prof1_lower.split()):
-                factors["profile_compatibility"]["score"] = 50
-                factors["profile_compatibility"]["details"] = f"Related professions: {user1.profession} and {user2.profession}"
-            else:
-                factors["profile_compatibility"]["score"] = 0
-                factors["profile_compatibility"]["details"] = f"Different professions: {user1.profession} and {user2.profession}"
-        else:
-            factors["profile_compatibility"]["details"] = "Profession information not available"
-        
-        # Calculate weighted total score
-        total_score = 0
-        for factor_name, factor_data in factors.items():
-            total_score += factor_data["score"] * factor_data["weight"]
-        
-        # Add small random factor for variety (-2 to +2 points)
-        random_factor = random.randint(-2, 2)
-        total_score += random_factor
-        
-        # Ensure score is between 0 and 100
-        total_score = max(0, min(100, int(total_score)))
-        
-        # Create result
-        result = {
-            "score": total_score,
-            "factors": factors,
-            "details": f"Compatibility score: {total_score}/100",
-            "random_factor": random_factor
-        }
-        
-        # Cache the result
-        self.compatibility_cache[cache_key] = result
-        
-        return result
-    
-    async def accept_match(
-        self,
-        match_id: int,
-        user_id: int,
-        session: AsyncSession = None
     ) -> Match:
-        """Accept a match request"""
-        if not session:
-            async with get_async_session() as session:
-                return await self._accept_match_internal(match_id, user_id, session)
-        
-        return await self._accept_match_internal(match_id, user_id, session)
-
-    async def _accept_match_internal(
+        """Create a match with a specific user"""
+        async with performance_monitor("create_match_with_user", user_id=user1_id):
+            match = Match(
+                user1_id=user1_id,
+                user2_id=user2_id,
+                status="active",
+                expires_at=datetime.utcnow() + timedelta(days=2)
+            )
+            
+            session.add(match)
+            await session.commit()
+            await session.refresh(match)
+            
+            return match
+    
+    async def _add_to_queue(
         self,
-        match_id: int,
         user_id: int,
         session: AsyncSession
-    ) -> Match:
-        """Internal method to accept match"""
-        # Get match
-        result = await session.execute(
-            select(Match).where(Match.id == match_id)
+    ):
+        """Add user to matching queue"""
+        from models.queue_entry import QueueEntry
+        
+        # Check if already in queue
+        existing = await session.execute(
+            select(QueueEntry).where(QueueEntry.user_id == user_id)
         )
-        match = result.scalar_one_or_none()
         
-        if not match or match.status != "pending":
-            raise MatchNotPendingError(f"Match {match_id} not found or not in pending status")
-        
-        if match.user1_id != user_id and match.user2_id != user_id:
-            raise MatchNotFoundError(f"User {user_id} is not part of match {match_id}")
-        
-        # Accept match
-        match.status = "active"
-        match.accepted_at = datetime.utcnow()
-        match.accepted_by = user_id
-        
-        await session.commit()
-        await session.refresh(match)
-        
-        logger.info(f"Match {match_id} accepted by user {user_id}")
-        return match
-    
-    async def reject_match(
-        self,
-        match_id: int,
-        user_id: int,
-        session: AsyncSession = None
-    ) -> Match:
-        """Reject a match request"""
-        if not session:
-            async with get_async_session() as session:
-                return await self._reject_match_internal(match_id, user_id, session)
-        
-        return await self._reject_match_internal(match_id, user_id, session)
-
-    async def _reject_match_internal(
-        self,
-        match_id: int,
-        user_id: int,
-        session: AsyncSession
-    ) -> Match:
-        """Internal method to reject match"""
-        # Get match
-        result = await session.execute(
-            select(Match).where(Match.id == match_id)
-        )
-        match = result.scalar_one_or_none()
-        
-        if not match or match.status != "pending":
-            raise MatchNotPendingError(f"Match {match_id} not found or not in pending status")
-        
-        if match.user1_id != user_id and match.user2_id != user_id:
-            raise MatchNotFoundError(f"User {user_id} is not part of match {match_id}")
-        
-        # Reject match
-        match.status = "rejected"
-        match.rejected_at = datetime.utcnow()
-        match.rejected_by = user_id
-        
-        # Return slots to both users
-        for user_id in [match.user1_id, match.user2_id]:
-            result = await session.execute(
-                select(User).where(User.id == user_id)
+        if not existing.scalar_one_or_none():
+            queue_entry = QueueEntry(
+                user_id=user_id,
+                status="waiting",
+                expires_at=datetime.utcnow() + timedelta(hours=1)
             )
-            user = result.scalar_one_or_none()
-            if user:
-                user.available_slots += 1
-                user.total_slots_used -= 1
-        
-        await session.commit()
-        await session.refresh(match)
-        
-        logger.info(f"Match {match_id} rejected by user {user_id}")
-        return match
-    
-    async def get_user_matches(
-        self,
-        user_id: int,
-        status: Optional[str] = None,
-        session: AsyncSession = None
-    ) -> List[Match]:
-        """Get matches for a user"""
-        if not session:
-            async with get_async_session() as session:
-                return await self._get_user_matches_internal(user_id, status, session)
-        
-        query = select(Match).where(
-            or_(Match.user1_id == user_id, Match.user2_id == user_id)
-        )
-        
-        if status:
-            query = query.where(Match.status == status)
-        
-        result = await session.execute(query)
-        return result.scalars().all()
-    
-    async def get_match_details(
-        self,
-        match_id: int,
-        user_id: int,
-        session: AsyncSession = None
-    ) -> Optional[Match]:
-        """Get detailed match information"""
-        if not session:
-            async with get_async_session() as session:
-                return await self._get_match_details_internal(match_id, user_id, session)
-        
-        result = await session.execute(
-            select(Match).where(
-                and_(
-                    Match.id == match_id,
-                    or_(Match.user1_id == user_id, Match.user2_id == user_id)
-                )
-            )
-        )
-        return result.scalar_one_or_none()
-    
-    async def cleanup_expired_matches(self, session: AsyncSession = None):
-        """Clean up expired matches"""
-        if not session:
-            async with get_async_session() as session:
-                return await self._cleanup_expired_matches_internal(session)
-        
-        # Find expired matches
-        result = await session.execute(
-            select(Match).where(
-                and_(
-                    Match.status.in_(["pending", "active"]),
-                    Match.created_at < datetime.utcnow() - timedelta(days=2)
-                )
-            )
-        )
-        expired_matches = result.scalars().all()
-        
-        for match in expired_matches:
-            match.status = "expired"
-            match.completed_at = datetime.utcnow()
-            
-            # Cancel auto-greeting timer
-            # await chat_service.cancel_auto_greeting_timer(match.id) # This line was removed as per the new_code
-            
-            logger.info(f"Marked match {match.id} as expired")
-        
-        await session.commit()
+            session.add(queue_entry)
+            await session.commit()
 
 # Global matching service instance
 matching_service = MatchingService() 
