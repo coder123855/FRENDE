@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # CORS Configuration
     CORS_ORIGINS: List[str] = Field(
         default_factory=lambda: (
-            ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"]
+            ["http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://127.0.0.1:5173"]
             if os.getenv("ENVIRONMENT", "development") == "development"
             else []
         ),
@@ -95,6 +95,8 @@ class Settings(BaseSettings):
     CDN_DOMAIN: Optional[str] = Field(default=None, description="CDN domain for assets")
     CDN_CACHE_DURATION: int = Field(default=31536000, description="CDN cache duration in seconds")
     CDN_GEO_DISTRIBUTION: bool = Field(default=True, description="Enable geographic distribution")
+    CDN_API_KEY: Optional[str] = Field(default=None, description="CDN API key for uploads")
+    CDN_BUCKET_NAME: Optional[str] = Field(default="frende-assets", description="CDN bucket name")
 
     # Asset Optimization Configuration
     ASSET_OPTIMIZATION_ENABLED: bool = Field(default=True, description="Enable asset optimization")
@@ -565,7 +567,7 @@ class Settings(BaseSettings):
         return False
 
     # WebSocket Monitoring Settings
-    WEBSOCKET_MONITORING_ENABLED: bool = Field(default=True, description="Enable WebSocket monitoring")
+    SOCKETIO_MONITORING_ENABLED: bool = Field(default=True, description="Enable Socket.IO monitoring")
     WEBSOCKET_HEARTBEAT_INTERVAL: int = Field(default=30, description="WebSocket heartbeat interval in seconds")
     WEBSOCKET_MAX_IDLE_TIME: int = Field(default=3600, description="Maximum idle time for WebSocket connections in seconds")
     WEBSOCKET_MAX_CONNECTIONS: int = Field(default=2000, description="Maximum number of concurrent WebSocket connections")

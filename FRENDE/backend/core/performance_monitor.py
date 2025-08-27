@@ -112,16 +112,65 @@ class PerformanceMonitor:
                                    status_code: Optional[int] = None, error: Optional[str] = None) -> None:
         """Record an external service call performance metric"""
         metric = PerformanceMetric(
-            operation=f"{service}: {endpoint}",
+            operation=f"External: {service} {endpoint}",
             duration=duration,
             timestamp=datetime.utcnow(),
             user_id=user_id,
             request_id=request_id,
             status_code=status_code,
-            error=error,
-            metadata={"service": service, "endpoint": endpoint}
+            error=error
         )
         self.record_metric(metric)
+    
+    def record_business_metric(self, metric_type: str, value: float, user_id: Optional[int] = None) -> None:
+        """Record a business metric for analytics"""
+        metric = PerformanceMetric(
+            operation=f"Business: {metric_type}",
+            duration=value,  # Use duration field for metric value
+            timestamp=datetime.utcnow(),
+            user_id=user_id,
+            metadata={"metric_type": metric_type, "value": value}
+        )
+        self.record_metric(metric)
+    
+    def get_performance_predictions(self) -> Dict[str, Any]:
+        """Get performance predictions based on historical data"""
+        try:
+            # Simple prediction based on recent trends
+            recent_metrics = [m for m in self.metrics if 
+                            (datetime.utcnow() - m.timestamp).total_seconds() < 3600]  # Last hour
+            
+            if not recent_metrics:
+                return {
+                    "predicted_load": "insufficient_data",
+                    "predicted_response_time": "insufficient_data",
+                    "confidence": 0
+                }
+            
+            # Calculate average response time
+            avg_response_time = sum(m.duration for m in recent_metrics) / len(recent_metrics)
+            
+            # Simple trend analysis
+            recent_avg = sum(m.duration for m in recent_metrics[-10:]) / min(10, len(recent_metrics))
+            older_avg = sum(m.duration for m in recent_metrics[:-10]) / max(1, len(recent_metrics) - 10) if len(recent_metrics) > 10 else recent_avg
+            
+            trend = "increasing" if recent_avg > older_avg else "decreasing" if recent_avg < older_avg else "stable"
+            
+            return {
+                "predicted_load": trend,
+                "predicted_response_time": avg_response_time,
+                "confidence": min(0.8, len(recent_metrics) / 100),  # Higher confidence with more data
+                "data_points": len(recent_metrics)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting performance predictions: {e}")
+            return {
+                "predicted_load": "error",
+                "predicted_response_time": "error",
+                "confidence": 0,
+                "error": str(e)
+            }
     
     def record_websocket_event(self, event_type: str, duration: float,
                               user_id: Optional[int] = None, room_id: Optional[str] = None) -> None:

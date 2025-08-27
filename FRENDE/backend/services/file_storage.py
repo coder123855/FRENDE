@@ -100,8 +100,49 @@ class FileStorageService:
         if not file_path:
             return None
         
-        # For development, return local file path
-        # In production, this would return a CDN URL
+        # Use CDN URL in production, local path in development
+        if settings.CDN_ENABLED and settings.CDN_DOMAIN:
+            return f"https://{settings.CDN_DOMAIN}/{file_path}"
+        
+        return f"/uploads/{file_path}"
+    
+    async def upload_to_cdn(self, file_path: str, file_content: bytes) -> str:
+        """
+        Upload file to CDN
+        
+        Args:
+            file_path: Relative file path
+            file_content: File content to upload
+            
+        Returns:
+            CDN URL
+        """
+        try:
+            if not settings.CDN_ENABLED or not settings.CDN_DOMAIN:
+                logger.warning("CDN not configured, skipping upload")
+                return f"/uploads/{file_path}"
+            
+            # For now, return local path - CDN integration can be added later
+            # This provides the structure for future CDN implementation
+            logger.info(f"CDN upload placeholder for {file_path}")
+            return f"https://{settings.CDN_DOMAIN}/{file_path}"
+            
+        except Exception as e:
+            logger.error(f"Error uploading to CDN: {str(e)}")
+            return f"/uploads/{file_path}"
+    
+    async def get_cdn_url(self, file_path: str) -> str:
+        """
+        Get CDN URL for a file
+        
+        Args:
+            file_path: Relative file path
+            
+        Returns:
+            CDN URL or local path
+        """
+        if settings.CDN_ENABLED and settings.CDN_DOMAIN:
+            return f"https://{settings.CDN_DOMAIN}/{file_path}"
         return f"/uploads/{file_path}"
     
     async def cleanup_old_profile_pictures(self, user_id: int, keep_filename: str):

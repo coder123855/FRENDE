@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './useAuth';
+import tokenManager from '../lib/tokenManager';
 
 export const useAutomaticGreeting = (matchId) => {
     const { user } = useAuth();
@@ -55,13 +56,20 @@ export const useAutomaticGreeting = (matchId) => {
     const loadGreetingStatus = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for automatic greeting API call');
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
         try {
             const response = await fetch(`/api/automatic-greeting/matches/${matchId}/status`, {
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -83,6 +91,13 @@ export const useAutomaticGreeting = (matchId) => {
     const handleTimeout = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for automatic greeting API call');
+            return;
+        }
+
         try {
             // Check if greeting has been sent
             if (greetingStatus?.greeting_sent) {
@@ -93,7 +108,7 @@ export const useAutomaticGreeting = (matchId) => {
             const response = await fetch(`/api/automatic-greeting/matches/${matchId}/send-automatic`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -124,11 +139,18 @@ export const useAutomaticGreeting = (matchId) => {
     const markGreetingSent = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for automatic greeting API call');
+            return;
+        }
+
         try {
             const response = await fetch(`/api/automatic-greeting/matches/${matchId}/mark-sent`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -149,6 +171,13 @@ export const useAutomaticGreeting = (matchId) => {
     const sendManualGreeting = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for automatic greeting API call');
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
@@ -156,7 +185,7 @@ export const useAutomaticGreeting = (matchId) => {
             const response = await fetch(`/api/automatic-greeting/matches/${matchId}/send-automatic`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -184,6 +213,13 @@ export const useAutomaticGreeting = (matchId) => {
     const getDefaultGreeting = useCallback(async (userName, templateId = null) => {
         if (!user) return null;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for automatic greeting API call');
+            return null;
+        }
+
         try {
             const url = new URL(`/api/automatic-greeting/default-greeting/${encodeURIComponent(userName)}`, window.location.origin);
             if (templateId) {
@@ -192,7 +228,7 @@ export const useAutomaticGreeting = (matchId) => {
 
             const response = await fetch(url.toString(), {
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -212,10 +248,17 @@ export const useAutomaticGreeting = (matchId) => {
     const getGreetingTemplates = useCallback(async () => {
         if (!user) return [];
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for automatic greeting API call');
+            return [];
+        }
+
         try {
             const response = await fetch('/api/automatic-greeting/templates', {
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });

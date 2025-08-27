@@ -2,9 +2,11 @@ import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { AccessibilityProvider } from './contexts/AccessibilityContext';
+import { OptimisticProvider } from './contexts/OptimisticContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import PublicRoute from './components/PublicRoute';
 import LoadingSkeleton from './components/loading/LoadingSkeleton';
+import TestPage from './components/TestPage';
 import './App.css';
 
 // Lazy load components for code splitting
@@ -24,54 +26,59 @@ function App() {
   return (
     <AccessibilityProvider>
       <AuthProvider>
-        <Router>
-          <div className="App">
-            <Suspense fallback={<LoadingSkeleton />}>
-              <Routes>
-                {/* Public routes */}
-                <Route 
-                  path="/login" 
-                  element={
-                    <PublicRoute>
-                      <LoginForm />
-                    </PublicRoute>
-                  } 
-                />
-                <Route 
-                  path="/register" 
-                  element={
-                    <PublicRoute>
-                      <RegisterForm />
-                    </PublicRoute>
-                  } 
-                />
+        <OptimisticProvider>
+          <Router>
+            <div className="App">
+              <Suspense fallback={<LoadingSkeleton />}>
+                <Routes>
+                  {/* Test route for styling verification */}
+                  <Route path="/test" element={<TestPage />} />
+                  
+                  {/* Public routes */}
+                  <Route 
+                    path="/login" 
+                    element={
+                      <PublicRoute>
+                        <LoginForm />
+                      </PublicRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/register" 
+                    element={
+                      <PublicRoute>
+                        <RegisterForm />
+                      </PublicRoute>
+                    } 
+                  />
 
-                {/* Protected routes */}
-                <Route 
-                  path="/" 
-                  element={
-                    <ProtectedRoute>
-                      <MainLayout />
-                    </ProtectedRoute>
-                  }
-                >
-                  <Route index element={<Navigate to="/home" replace />} />
-                  <Route path="home" element={<HomeDashboard />} />
-                  <Route path="matching" element={<MatchingInterface />} />
-                  <Route path="chat" element={<ChatList />} />
-                  <Route path="chat/:matchId" element={<Chat />} />
-                  <Route path="tasks" element={<TaskManager />} />
-                  <Route path="profile" element={<Profile />} />
-                  <Route path="store" element={<Store />} />
-                  <Route path="match-success/:matchId" element={<MatchSuccess />} />
-                </Route>
+                  {/* Protected routes */}
+                  <Route 
+                    path="/" 
+                    element={
+                      <ProtectedRoute>
+                        <MainLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<Navigate to="/home" replace />} />
+                    <Route path="home" element={<HomeDashboard />} />
+                    <Route path="matching" element={<MatchingInterface />} />
+                    <Route path="chat" element={<ChatList />} />
+                    <Route path="chat/:matchId" element={<Chat />} />
+                    <Route path="tasks" element={<TaskManager />} />
+                    <Route path="profile" element={<Profile />} />
+                    <Route path="store" element={<Store />} />
+                    <Route path="match-success/:matchId" element={<MatchSuccess />} />
+                  </Route>
 
-                {/* Catch all route */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Suspense>
-          </div>
-        </Router>
+                  {/* Catch all route */}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Suspense>
+            </div>
+          </Router>
+        </OptimisticProvider>
       </AuthProvider>
     </AccessibilityProvider>
   );

@@ -44,7 +44,8 @@ class ImageProcessingService:
         max_width: int = 1200,
         max_height: int = 1200,
         quality: str = "medium",
-        generate_thumbnails: bool = True
+        generate_thumbnails: bool = True,
+        generate_modern_formats: bool = True
     ) -> Dict[str, Any]:
         """
         Process uploaded image with optimization and resizing
@@ -80,6 +81,13 @@ class ImageProcessingService:
                     resized_image, user_id, image_type
                 )
             
+            # Generate modern formats if requested
+            modern_formats = {}
+            if generate_modern_formats:
+                modern_formats = await self._generate_modern_formats(
+                    resized_image, user_id, image_type, quality
+                )
+            
             # Save original optimized version
             filename = f"{user_id}_{image_type}_{uuid.uuid4().hex[:8]}.jpg"
             filepath = self.upload_dir / "profiles" / filename
@@ -107,6 +115,7 @@ class ImageProcessingService:
                 "format": "JPEG",
                 "quality": quality,
                 "thumbnails": thumbnails,
+                "modern_formats": modern_formats,
                 "optimized_versions": optimized_versions
             }
             
@@ -183,6 +192,85 @@ class ImageProcessingService:
             logger.warning(f"Failed to generate PNG version: {e}")
         
         return versions
+
+    async def _generate_modern_formats(
+        self,
+        image: Image.Image,
+        user_id: str,
+        image_type: str,
+        quality: str
+    ) -> Dict[str, str]:
+        """
+        Generate modern image formats (WebP, AVIF) for better compression
+        """
+        formats = {}
+        base_filename = f"{user_id}_{image_type}_{uuid.uuid4().hex[:8]}"
+        
+        # WebP version
+        try:
+            webp_filename = f"{base_filename}.webp"
+            webp_path = self.upload_dir / "optimized" / webp_filename
+            image.save(
+                webp_path,
+                'WEBP',
+                quality=self.quality_settings[quality],
+                method=6  # Best compression
+            )
+            formats['webp'] = f"/uploads/optimized/{webp_filename}"
+        except Exception as e:
+            logger.warning(f"Failed to generate WebP version: {e}")
+        
+        # AVIF version (if supported)
+        try:
+            avif_filename = f"{base_filename}.avif"
+            avif_path = self.upload_dir / "optimized" / avif_filename
+            # Note: AVIF support requires pillow-avif-plugin
+            # For now, we'll skip AVIF generation
+            logger.info("AVIF generation skipped - requires additional plugin")
+        except Exception as e:
+            logger.warning(f"Failed to generate AVIF version: {e}")
+        
+        return formats
+
+    async def generate_responsive_images(
+        self,
+        image: Image.Image,
+        user_id: str,
+        image_type: str
+    ) -> Dict[str, str]:
+        """
+        Generate responsive images in multiple sizes
+        """
+        sizes = {
+            "small": (320, 320),
+            "medium": (640, 640),
+            "large": (1280, 1280)
+        }
+        
+        responsive_images = {}
+        
+        for size_name, (width, height) in sizes.items():
+            try:
+                resized = self._resize_image(image, width, height)
+                filename = f"{user_id}_{image_type}_{size_name}_{uuid.uuid4().hex[:8]}.jpg"
+                filepath = self.upload_dir / "responsive" / filename
+                
+                # Ensure directory exists
+                filepath.parent.mkdir(exist_ok=True)
+                
+                resized.save(
+                    filepath,
+                    'JPEG',
+                    quality=self.quality_settings['medium'],
+                    optimize=True
+                )
+                
+                responsive_images[size_name] = f"/uploads/responsive/{filename}"
+                
+            except Exception as e:
+                logger.error(f"Failed to generate {size_name} responsive image: {e}")
+        
+        return responsive_images
 
     async def _generate_thumbnails(
         self,

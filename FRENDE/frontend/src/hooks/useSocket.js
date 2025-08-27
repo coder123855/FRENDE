@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import socketManager from '../lib/socket';
+import tokenManager from '../lib/tokenManager';
 import { useAuth } from './useAuth';
 
 /**
@@ -20,6 +21,12 @@ export const useSocket = () => {
     const [reconnectAttempts, setReconnectAttempts] = useState(0);
     const [lastError, setLastError] = useState(null);
     const [eventQueueLength, setEventQueueLength] = useState(0);
+    const [connectionQuality, setConnectionQuality] = useState({
+        latency: 0,
+        messageCount: 0,
+        errorRate: 0,
+        lastPing: null
+    });
     
     // Refs for cleanup and state management
     const eventListeners = useRef(new Map());
@@ -28,20 +35,28 @@ export const useSocket = () => {
 
     // Initialize socket connection when user is available
     useEffect(() => {
-        if (!user?.token) {
+        // Get token from tokenManager instead of user object
+        const token = tokenManager.getAccessToken();
+        
+        console.log('🔌 useSocket: Token:', token ? 'Present' : 'Missing');
+        console.log('🔌 useSocket: User:', user);
+        
+        if (!token) {
+            console.log('🔌 useSocket: No token available, disconnecting');
             disconnect();
             return;
         }
 
         if (!isConnected && !isConnecting) {
-            connect(user.token);
+            console.log('🔌 useSocket: Connecting to socket with token');
+            connect(token);
         }
 
         return () => {
             mounted.current = false;
             cleanup();
         };
-    }, [user?.token, isConnected, isConnecting]);
+    }, [user, isConnected, isConnecting]);
 
     // Monitor connection state changes
     useEffect(() => {
@@ -49,7 +64,7 @@ export const useSocket = () => {
             if (!mounted.current) return;
 
             const currentState = socketManager.getConnectionState();
-            const currentConnected = socketManager.isConnected();
+            const currentConnected = socketManager.getIsConnected();
             const currentConnecting = currentState === 'connecting';
             const currentReconnectAttempts = socketManager.getReconnectAttempts();
             const currentEventQueueLength = socketManager.getEventQueueLength();
@@ -202,17 +217,19 @@ export const useSocket = () => {
     }, []);
 
     // Send message
-    const sendMessage = useCallback((matchId, message, type = 'text') => {
+    const sendMessage = useCallback(async (matchId, message, type = 'text') => {
         if (!matchId || !message) {
             console.warn('Invalid parameters provided to sendMessage');
             return;
         }
 
         try {
-            socketManager.sendMessage(matchId, message, type);
+            const result = await socketManager.sendMessage(matchId, message, type);
+            return result;
         } catch (error) {
             console.error('Failed to send message:', error);
             setLastError(error.message);
+            throw error;
         }
     }, []);
 
@@ -293,6 +310,37 @@ export const useSocket = () => {
         setLastError(null);
     }, []);
 
+    // Add ping/pong monitoring
+    useEffect(() => {
+        if (!isConnected) return;
+        
+        const pingInterval = setInterval(() => {
+            const startTime = Date.now();
+            
+            socketManager.emit('ping', { timestamp: startTime });
+            
+            // Listen for pong
+            const pongHandler = (data) => {
+                const latency = Date.now() - data.timestamp;
+                setConnectionQuality(prev => ({
+                    ...prev,
+                    latency,
+                    lastPing: new Date().toISOString()
+                }));
+            };
+            
+            socketManager.on('pong', pongHandler);
+            
+            // Cleanup pong listener after 5 seconds
+            setTimeout(() => {
+                socketManager.off('pong', pongHandler);
+            }, 5000);
+            
+        }, 30000); // Ping every 30 seconds
+        
+        return () => clearInterval(pingInterval);
+    }, [isConnected]);
+
     // Cleanup function
     const cleanup = useCallback(() => {
         // Remove all event listeners
@@ -326,6 +374,7 @@ export const useSocket = () => {
         reconnectAttempts,
         lastError,
         eventQueueLength,
+        connectionQuality,
 
         // Connection methods
         connect,

@@ -9,6 +9,7 @@ from core.database import get_async_session, get_database_stats
 from core.database_optimization import db_optimizer
 from core.auth import current_active_user
 from models.user import User
+from services.socket_analytics import socket_analytics
 
 logger = logging.getLogger(__name__)
 
@@ -261,4 +262,93 @@ async def clear_query_cache(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error clearing query cache: {str(e)}"
+        )
+
+# Socket.IO Analytics Endpoints
+
+@router.get("/socket/analytics/user/{user_id}")
+async def get_user_socket_analytics(
+    user_id: int,
+    current_user: User = Depends(current_active_user)
+):
+    """Get Socket.IO analytics for a specific user"""
+    try:
+        # Check if user is admin or requesting their own data
+        if current_user.id != user_id and not current_user.is_superuser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied. Can only view own analytics or admin access required."
+            )
+        
+        analytics = socket_analytics.get_user_analytics(user_id)
+        
+        return {
+            "user_id": user_id,
+            "analytics": analytics,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user socket analytics: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving user socket analytics: {str(e)}"
+        )
+
+@router.get("/socket/analytics/system")
+async def get_system_socket_analytics(
+    current_user: User = Depends(current_active_user)
+):
+    """Get system-wide Socket.IO analytics"""
+    try:
+        # Check if user is admin
+        if not current_user.is_superuser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied. Admin privileges required."
+            )
+        
+        analytics = socket_analytics.get_system_analytics()
+        performance = socket_analytics.get_performance_metrics()
+        
+        return {
+            "system_analytics": analytics,
+            "performance_metrics": performance,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting system socket analytics: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving system socket analytics: {str(e)}"
+        )
+
+@router.post("/socket/analytics/cleanup")
+async def cleanup_socket_analytics(
+    days: int = 7,
+    current_user: User = Depends(current_active_user)
+):
+    """Clean up old Socket.IO analytics data"""
+    try:
+        # Check if user is admin
+        if not current_user.is_superuser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied. Admin privileges required."
+            )
+        
+        # Clean up old data
+        socket_analytics.cleanup_old_data(days)
+        
+        return {
+            "message": f"Socket analytics data older than {days} days cleaned up successfully",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up socket analytics: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error cleaning up socket analytics: {str(e)}"
         )

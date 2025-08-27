@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import uvicorn
 import os
 from typing import Optional
+import socketio
 
 # Import core modules
 from core.config import configure_logging, settings
@@ -13,9 +14,12 @@ from core.auth import current_active_user
 from core.middleware import create_middleware_stack
 
 # Import API routers
-from api import auth, users, matches, tasks, chat, websocket
+from api import auth, users, matches, tasks, chat
 from api import conversation_starter, automatic_greeting, coin_rewards
-from api import monitoring, health, rate_limiting, asset_performance, task_chat
+from api import monitoring, health, rate_limiting, asset_performance, task_chat, analytics
+
+# Import Socket.IO server
+from api.socketio_server import sio
 
 # Import models for database initialization
 from models.user import User
@@ -35,24 +39,28 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Create Socket.IO app and mount it
+socket_app = socketio.ASGIApp(sio, app)
+
 # Security
 security = HTTPBearer()
 
 # Include API routers
-app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-app.include_router(users.router, prefix="/users", tags=["Users"])
-app.include_router(matches.router, prefix="/matches", tags=["Matches"])
-app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
-app.include_router(chat.router, prefix="/chat", tags=["Chat"])
-app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
-app.include_router(conversation_starter.router, prefix="/conversation-starter", tags=["Conversation Starter"])
-app.include_router(automatic_greeting.router, prefix="/automatic-greeting", tags=["Automatic Greeting"])
-app.include_router(coin_rewards.router, prefix="/coins", tags=["Coin Rewards"])
-app.include_router(monitoring.router, prefix="/monitoring", tags=["Monitoring"])
-app.include_router(health.router, prefix="/health", tags=["Health"])
-app.include_router(rate_limiting.router, prefix="/rate-limiting", tags=["Rate Limiting"])
-app.include_router(asset_performance.router, prefix="/assets", tags=["Asset Performance"])
-app.include_router(task_chat.router, prefix="/task-chat", tags=["Task Chat"])
+app.include_router(auth.router, prefix="/api", tags=["Authentication"])
+app.include_router(users.router, prefix="/api", tags=["Users"])
+app.include_router(matches.router, prefix="/api", tags=["Matches"])
+app.include_router(tasks.router, prefix="/api", tags=["Tasks"])
+app.include_router(chat.router, prefix="/api", tags=["Chat"])
+
+app.include_router(conversation_starter.router, prefix="/api", tags=["Conversation Starter"])
+app.include_router(automatic_greeting.router, prefix="/api", tags=["Automatic Greeting"])
+app.include_router(coin_rewards.router, prefix="/api", tags=["Coin Rewards"])
+app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
+app.include_router(health.router, prefix="/api", tags=["Health"])
+app.include_router(rate_limiting.router, prefix="/api", tags=["Rate Limiting"])
+app.include_router(asset_performance.router, prefix="/api", tags=["Asset Performance"])
+app.include_router(task_chat.router, prefix="/api", tags=["Task Chat"])
+app.include_router(analytics.router, prefix="/api", tags=["Analytics"])
 
 @app.get("/")
 async def root():
@@ -123,7 +131,7 @@ app = create_middleware_stack(app)
 
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "main:socket_app",
         host="0.0.0.0",
         port=8000,
         reload=True,

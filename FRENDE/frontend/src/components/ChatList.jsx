@@ -24,10 +24,38 @@ const ChatList = () => {
   } = useMatches();
 
   useEffect(() => {
+    console.log('ChatList: Fetching matches...');
     fetchMatches();
   }, [fetchMatches]);
 
+  // Debug logging
+  useEffect(() => {
+    console.log('ChatList: State updated:', {
+      matches,
+      pendingMatches,
+      activeMatches,
+      expiredMatches,
+      loading: matchesLoading,
+      error: matchesError
+    });
+    
+    // Debug active matches specifically
+    if (activeMatches.length > 0) {
+      console.log('ChatList: Active matches found:', activeMatches);
+      activeMatches.forEach((match, index) => {
+        console.log(`ChatList: Active match ${index}:`, {
+          id: match.id,
+          status: match.status,
+          matched_user: match.matched_user,
+          created_at: match.created_at
+        });
+      });
+    }
+  }, [matches, pendingMatches, activeMatches, expiredMatches, matchesLoading, matchesError]);
+
   const handleChat = (matchId) => {
+    console.log('ChatList: handleChat called with matchId:', matchId);
+    console.log('ChatList: Navigating to:', `/chat/${matchId}`);
     navigate(`/chat/${matchId}`);
   };
 
@@ -93,10 +121,18 @@ const ChatList = () => {
           <h1 className="text-3xl font-bold text-foreground">Your Chats</h1>
           <p className="text-muted-foreground">Connect with your matched friends</p>
         </div>
-        <Button onClick={handleGoToMatching} variant="outline">
-          <Heart className="w-4 h-4 mr-2" />
-          Find More Friends
-        </Button>
+                 <div className="flex space-x-2">
+           <Button onClick={() => {
+             console.log('Test navigation to chat/1');
+             navigate('/chat/1');
+           }} variant="outline">
+             Test Chat
+           </Button>
+           <Button onClick={handleGoToMatching} variant="outline">
+             <Heart className="w-4 h-4 mr-2" />
+             Find More Friends
+           </Button>
+         </div>
       </div>
 
       {/* Tabs */}
@@ -125,10 +161,18 @@ const ChatList = () => {
         </button>
       </div>
 
-      {/* Active Matches */}
-      {activeTab === 'active' && (
-        <div className="space-y-4">
-          {activeMatches.length === 0 ? (
+             {/* Active Matches */}
+       {activeTab === 'active' && (
+         <div className="space-y-4">
+           {/* Debug info */}
+           <div className="bg-yellow-100 p-4 rounded-lg">
+             <h4 className="font-semibold">Debug Info:</h4>
+             <p>Active matches count: {activeMatches.length}</p>
+             <p>All matches count: {matches.length}</p>
+             <p>Active matches: {JSON.stringify(activeMatches, null, 2)}</p>
+           </div>
+           
+           {activeMatches.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center">
                 <MessageCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -142,8 +186,17 @@ const ChatList = () => {
               </CardContent>
             </Card>
           ) : (
-            activeMatches.map((match) => (
-              <Card key={match.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => handleChat(match.id)}>
+                         activeMatches.map((match) => (
+               <Card 
+                 key={match.id} 
+                 className="hover:shadow-md transition-shadow cursor-pointer" 
+                 onClick={(e) => {
+                   e.preventDefault();
+                   e.stopPropagation();
+                   console.log('Card clicked! Match ID:', match.id);
+                   handleChat(match.id);
+                 }}
+               >
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-4">

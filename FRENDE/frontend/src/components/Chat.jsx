@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -29,13 +30,16 @@ import { useOffline } from '../hooks/useOffline';
 import TaskStatusPanel from './TaskStatusPanel';
 import TaskNotification from './TaskNotification';
 
-const Chat = ({ matchId }) => {
+const Chat = () => {
+  const { matchId } = useParams();
   const { user } = useAuth();
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
   const inputRef = useRef(null);
   const messagesEndRef = useRef(null);
+  
+
 
   const {
     messages,
@@ -90,6 +94,42 @@ const Chat = ({ matchId }) => {
 
   // Offline state
   const { isOnline } = useOffline();
+
+  // Handle missing matchId
+  if (!matchId) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-red-600 mb-2">Invalid Chat</h3>
+          <p className="text-muted-foreground">No match ID provided. Please go back and try again.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Add error boundary for debugging
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-red-600 mb-2">Chat Error</h3>
+          <p className="text-muted-foreground mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()} variant="outline">
+            Reload Page
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state
+  if (isLoading) {
+    return <ChatLoadingSkeleton />;
+  }
+
+  // Continue with the rest of the component logic
 
   // Auto-assign conversation starter if none exists
   useEffect(() => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './useAuth';
+import tokenManager from '../lib/tokenManager';
 
 export const useTaskChat = (matchId) => {
     const { user } = useAuth();
@@ -111,13 +112,20 @@ export const useTaskChat = (matchId) => {
     const loadTaskStatus = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for task chat API call');
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
         try {
             const response = await fetch(`/api/task-chat/matches/${matchId}/status`, {
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -139,10 +147,17 @@ export const useTaskChat = (matchId) => {
     const loadTaskNotifications = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for task chat API call');
+            return;
+        }
+
         try {
             const response = await fetch(`/api/task-chat/matches/${matchId}/notifications`, {
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -161,6 +176,13 @@ export const useTaskChat = (matchId) => {
     const submitTaskViaChat = useCallback(async (taskId, submissionText, evidenceUrl = null) => {
         if (!user || !matchId) return null;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for task chat API call');
+            return null;
+        }
+
         setIsLoading(true);
         setError(null);
 
@@ -168,7 +190,7 @@ export const useTaskChat = (matchId) => {
             const response = await fetch(`/api/task-chat/matches/${matchId}/tasks/${taskId}/submit`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
@@ -219,6 +241,13 @@ export const useTaskChat = (matchId) => {
     const completeTaskViaChat = useCallback(async (taskId) => {
         if (!user || !matchId) return null;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for task chat API call');
+            return null;
+        }
+
         setIsLoading(true);
         setError(null);
 
@@ -226,7 +255,7 @@ export const useTaskChat = (matchId) => {
             const response = await fetch(`/api/task-chat/matches/${matchId}/tasks/${taskId}/complete`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -270,11 +299,18 @@ export const useTaskChat = (matchId) => {
     const markNotificationRead = useCallback(async (notificationId) => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for task chat API call');
+            return;
+        }
+
         try {
             const response = await fetch(`/api/task-chat/matches/${matchId}/notifications/${notificationId}/read`, {
                 method: 'PUT',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -311,11 +347,18 @@ export const useTaskChat = (matchId) => {
     const sendTaskNotification = useCallback(async (taskId, notificationType, message) => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for task chat API call');
+            return;
+        }
+
         try {
             const response = await fetch(`/api/task-chat/matches/${matchId}/tasks/${taskId}/notify`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({

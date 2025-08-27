@@ -18,6 +18,11 @@ export const useMatches = () => {
   const socketConnected = useRef(false);
   const expirationTimers = useRef(new Map());
 
+  // Get match by ID - moved to top to avoid hoisting issues
+  const getMatchById = useCallback((matchId) => {
+    return matches.find(match => match.id === matchId);
+  }, [matches]);
+
   // Initialize socket connection and event listeners
   useEffect(() => {
     if (socket.isConnected && !socketConnected.current) {
@@ -89,8 +94,22 @@ export const useMatches = () => {
       setError(null);
       
       const response = await matchAPI.getMatches();
-      const matchesData = response.data;
+      console.log('Matches API response:', response);
       
+      // Handle different response formats
+      let matchesData = [];
+      if (response.data && response.data.matches) {
+        // Backend returns { matches: [...], total: number }
+        matchesData = response.data.matches;
+      } else if (Array.isArray(response.data)) {
+        // Direct array response
+        matchesData = response.data;
+      } else {
+        console.warn('Unexpected matches response format:', response.data);
+        matchesData = [];
+      }
+      
+      console.log('Processed matches data:', matchesData);
       setMatches(matchesData);
       
       // Categorize matches
@@ -100,8 +119,8 @@ export const useMatches = () => {
       setupExpirationTimers(matchesData);
       
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to fetch matches');
       console.error('Error fetching matches:', err);
+      setError(err.response?.data?.detail || 'Failed to fetch matches');
     } finally {
       setLoading(false);
     }
@@ -354,10 +373,7 @@ export const useMatches = () => {
     }
   }, [matches, pendingMatches, activeMatches, expiredMatches]);
 
-  // Get match by ID
-  const getMatchById = useCallback((matchId) => {
-    return matches.find(match => match.id === matchId);
-  }, [matches]);
+
 
   // Clear error
   const clearError = useCallback(() => {

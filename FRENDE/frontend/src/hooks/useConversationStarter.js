@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from './useAuth';
+import tokenManager from '../lib/tokenManager';
 
 export const useConversationStarter = (matchId) => {
     const { user } = useAuth();
@@ -45,13 +46,20 @@ export const useConversationStarter = (matchId) => {
     const loadConversationStarter = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for conversation starter API call');
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
         try {
             const response = await fetch(`/api/conversation-starter/matches/${matchId}`, {
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -76,6 +84,13 @@ export const useConversationStarter = (matchId) => {
     const assignConversationStarter = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for conversation starter API call');
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
@@ -83,7 +98,7 @@ export const useConversationStarter = (matchId) => {
             const response = await fetch(`/api/conversation-starter/matches/${matchId}/assign`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -107,6 +122,13 @@ export const useConversationStarter = (matchId) => {
     const resetConversationStarter = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for conversation starter API call');
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
@@ -114,7 +136,7 @@ export const useConversationStarter = (matchId) => {
             const response = await fetch(`/api/conversation-starter/matches/${matchId}/reset`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -138,11 +160,19 @@ export const useConversationStarter = (matchId) => {
     const checkTimeout = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const tokenInfo = tokenManager.getTokenInfo();
+        const token = tokenInfo?.accessToken;
+        
+        if (!token) {
+            console.error('No token available for conversation starter API call');
+            return;
+        }
+
         try {
             const response = await fetch(`/api/conversation-starter/matches/${matchId}/check-timeout`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -163,11 +193,18 @@ export const useConversationStarter = (matchId) => {
     const markGreetingSent = useCallback(async () => {
         if (!user || !matchId) return;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for conversation starter API call');
+            return;
+        }
+
         try {
             const response = await fetch(`/api/conversation-starter/matches/${matchId}/mark-greeting-sent`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -188,10 +225,17 @@ export const useConversationStarter = (matchId) => {
     const getDefaultGreeting = useCallback(async (userName) => {
         if (!user) return null;
 
+        const token = tokenManager.getAccessToken();
+        
+        if (!token) {
+            console.error('No token available for conversation starter API call');
+            return null;
+        }
+
         try {
             const response = await fetch(`/api/conversation-starter/default-greeting?user_name=${encodeURIComponent(userName)}`, {
                 headers: {
-                    'Authorization': `Bearer ${user.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             });

@@ -4,7 +4,7 @@ from core.database import get_async_session, check_database_health
 from core.config import settings
 from core.monitoring import SystemMonitor
 from core.ai_health_check import ai_health_checker
-from core.websocket_monitor import websocket_monitor
+from core.socketio_monitor import socketio_monitor
 from core.external_service_monitor import external_service_monitor
 import psutil
 import time
@@ -38,8 +38,8 @@ async def detailed_health_check(db: AsyncSession = Depends(get_async_session)):
     # AI services health check
     ai_health = await ai_health_checker.check_all_ai_services()
     
-    # WebSocket health check
-    websocket_health = websocket_monitor.get_connection_health()
+    # Socket.IO health check
+    websocket_health = socketio_monitor.get_connection_health()
     
     # External services health check
     external_health = await external_service_monitor.check_all_services()
@@ -134,8 +134,8 @@ async def ai_health_check():
 
 @router.get("/websocket")
 async def websocket_health_check():
-    """WebSocket health check"""
-    websocket_health = websocket_monitor.get_connection_health()
+    """Socket.IO health check"""
+    websocket_health = socketio_monitor.get_connection_health()
     
     return {
         "status": websocket_health["status"],
@@ -160,7 +160,7 @@ async def readiness_check(db: AsyncSession = Depends(get_async_session)):
     # Check all critical services
     db_health = await check_database_health()
     ai_health = await ai_health_checker.check_all_ai_services()
-    websocket_health = websocket_monitor.get_connection_health()
+    websocket_health = socketio_monitor.get_connection_health()
     
     # Determine if application is ready
     is_ready = (
@@ -197,7 +197,7 @@ async def aggregated_health_check():
     # Collect all health checks
     db_health = await check_database_health()
     ai_health = await ai_health_checker.check_all_ai_services()
-    websocket_health = websocket_monitor.get_connection_health()
+    websocket_health = socketio_monitor.get_connection_health()
     external_health = await external_service_monitor.check_all_services()
     
     # Calculate health scores (0-100)

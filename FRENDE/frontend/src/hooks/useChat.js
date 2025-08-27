@@ -3,6 +3,7 @@ import { useSocket } from './useSocket';
 import { useAuth } from './useAuth';
 import { useOffline } from './useOffline';
 import { useOptimisticUpdate } from './useOptimisticUpdate';
+import { chatAPI } from '../lib/api';
 
 export const useChat = (matchId) => {
     const { user } = useAuth();
@@ -98,14 +99,14 @@ export const useChat = (matchId) => {
         
         // Save to offline storage
         if (isOfflineMode) {
-            saveMessageOffline(newMessage);
+            storeChatMessage(newMessage);
         }
 
         // Scroll to bottom
         if (lastMessageRef.current) {
             lastMessageRef.current.scrollIntoView({ behavior: 'smooth' });
         }
-    }, [isOfflineMode, saveMessageOffline]);
+    }, [isOfflineMode, storeChatMessage]);
 
     // Handle user typing
     const handleUserTyping = useCallback((data) => {
@@ -192,19 +193,24 @@ export const useChat = (matchId) => {
             setIsLoading(true);
             setError(null);
 
-            // TODO: Implement API call to load chat history
-            // const response = await chatAPI.getChatHistory(matchId, page, size);
-            // setMessages(response.data.messages);
-            // setHasMore(response.data.has_more);
-            // setNextCursor(response.data.next_cursor);
-            // setPrevCursor(response.data.prev_cursor);
+            // Make actual API call to load chat history
+            const response = await chatAPI.getChatHistory(matchId, page, size);
 
-            // For now, use mock data
+            if (response.data) {
+                setMessages(response.data.messages || []);
+                setHasMore(response.data.has_more || false);
+                setNextCursor(response.data.next_cursor || null);
+                setPrevCursor(response.data.prev_cursor || null);
+            } else {
+                setMessages([]);
+                setHasMore(false);
+            }
+        } catch (err) {
+            setError(err.response?.data?.detail || err.message || 'Failed to load chat history');
+            console.error('Error loading chat history:', err);
+            // Fallback to empty messages on error
             setMessages([]);
             setHasMore(false);
-        } catch (err) {
-            setError(err.message || 'Failed to load chat history');
-            console.error('Error loading chat history:', err);
         } finally {
             setIsLoading(false);
         }
@@ -239,34 +245,35 @@ export const useChat = (matchId) => {
         if (!matchId) return;
 
         try {
-            // TODO: Implement API call to load room status
-            // const response = await chatAPI.getRoomStatus(matchId);
-            // setOnlineUsers(response.data.online_users);
-            // setTypingUsers(response.data.typing_users);
-
-            // For now, use empty arrays
-            setOnlineUsers([]);
-            setTypingUsers([]);
+            // Make actual API call to load room status
+            const response = await chatAPI.getChatStatus(matchId);
+            
+            if (response.data) {
+                setOnlineUsers(response.data.online_users || []);
+                // Note: typing users are typically handled via WebSocket, not API
+                setTypingUsers([]);
+            } else {
+                setOnlineUsers([]);
+                setTypingUsers([]);
+            }
         } catch (err) {
             console.error('Error loading room status:', err);
+            // Fallback to empty arrays on error
+            setOnlineUsers([]);
+            setTypingUsers([]);
         }
     }, [matchId]);
 
     // Load offline messages
     const loadOfflineMessages = useCallback(async () => {
-        if (!hasOfflineMessages) {
-            setMessages([]);
-            return;
-        }
-
         try {
-            const offlineMsgs = await refreshOfflineMessages();
+            const offlineMsgs = await getOfflineChatHistory(matchId);
             setMessages(offlineMsgs);
         } catch (err) {
             console.error('Error loading offline messages:', err);
             setMessages([]);
         }
-    }, [hasOfflineMessages, refreshOfflineMessages]);
+    }, [matchId, getOfflineChatHistory]);
 
     // Send message
     const sendMessage = useCallback(async (message, type = 'text', taskId = null) => {
@@ -331,7 +338,7 @@ export const useChat = (matchId) => {
                     is_read: false
                 };
 
-                await saveMessageOffline(offlineMessage);
+                await storeChatMessage(offlineMessage);
                 setMessages(prev => [...prev, offlineMessage]);
             }
 
@@ -343,7 +350,7 @@ export const useChat = (matchId) => {
             setError(err.message || 'Failed to send message');
             console.error('Error sending message:', err);
         }
-    }, [matchId, user, isOnline, socket.isConnected, saveMessageOffline]);
+    }, [matchId, user, isOnline, socket.isConnected, storeChatMessage]);
 
     // Handle typing
     const handleTyping = useCallback((isTyping) => {

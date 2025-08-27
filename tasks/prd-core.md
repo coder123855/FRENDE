@@ -75,19 +75,28 @@ Frende is an AI-powered social media app designed to help users make new friends
   - FastAPI (core routing, business logic)
   - Background tasks for auto-generating and refreshing AI tasks
   - OAuth2/JWT authentication (via fastapi-users)
-  - FastAPI WebSocket for real-time chat
+  - Socket.IO server for real-time chat (consolidated implementation)
   - Deployed on Render or Railway
 
 - **Database:**
   - PostgreSQL (main relational database)
   - SQLAlchemy + Alembic (ORM and migrations)
 
+- **Real-time Communication:**
+  - Socket.IO (consolidated implementation with enhanced features)
+  - Message acknowledgments and delivery guarantees
+  - Connection quality monitoring and health checks
+  - Performance analytics and error tracking
+  - Automatic reconnection with exponential backoff
+
 - **Optional / Monitoring:**
   - Redis (for matchmaking queues, if scaling is needed)
   - Sentry, PostHog, or PromptLayer for monitoring and analytics (optional for MVP)
+  - Socket.IO analytics for real-time performance monitoring
 
 - **Security:**
   - All user data encrypted at rest (PostgreSQL) and in transit (HTTPS/WSS)
+  - JWT authentication for Socket.IO connections
 
 - **Localization:**
   - i18n support (e.g., react-i18next), Vietnamese prioritized
@@ -102,4 +111,85 @@ Frende is an AI-powered social media app designed to help users make new friends
 - Are there any additional profile fields required for future features?
 - Should users be able to report or block matches?
 - What is the process for updating the set of communities/locations?
-- Are there any legal/privacy requirements for storing user data in target regions? 
+- Are there any legal/privacy requirements for storing user data in target regions?
+
+## 10. Technical Implementation Notes
+
+### Real-time Communication Consolidation
+The application has been updated to use a consolidated Socket.IO implementation for all real-time communication features. This consolidation provides:
+
+- **Enhanced Reliability**: Message acknowledgments ensure delivery confirmation
+- **Better Performance**: Connection quality monitoring and health checks
+- **Improved Debugging**: Comprehensive analytics and error tracking
+- **Simplified Architecture**: Single real-time communication layer instead of dual WebSocket/Socket.IO implementation
+
+### Key Enhancements Added:
+1. **Message Acknowledgments**: All messages now receive delivery confirmations
+2. **Connection Quality Monitoring**: Real-time latency and performance tracking
+3. **Health Check System**: Automatic cleanup of inactive connections
+4. **Performance Analytics**: Detailed metrics for connection and message performance
+5. **Enhanced Error Handling**: Better error recovery and user feedback
+6. **Automatic Reconnection**: Robust reconnection with exponential backoff
+
+### Migration Benefits:
+- Reduced complexity and maintenance overhead
+- Improved reliability and user experience
+- Better monitoring and debugging capabilities
+- Future-ready architecture for scaling
+
+### Backend Infrastructure Enhancements
+The backend has been significantly enhanced with production-ready infrastructure components:
+
+#### File Storage & CDN Integration
+- **Enhanced File Storage Service**: CDN-ready with automatic URL generation
+- **Modern Image Processing**: WebP/AVIF support, responsive images, and optimization
+- **File Lifecycle Management**: Automatic cleanup, backup, and storage optimization
+- **CDN Configuration**: Ready for production CDN integration
+
+#### Performance & Caching System
+- **Intelligent Caching**: Multi-level caching for database queries and API responses
+- **Cache Invalidation**: Pattern-based cache invalidation for data consistency
+- **Performance Monitoring**: Comprehensive metrics collection and analysis
+- **Query Optimization**: Database query performance tracking and optimization
+
+#### Analytics & Monitoring
+- **Comprehensive Analytics API**: Business metrics, user engagement, and performance analytics
+- **Real-time Monitoring**: System health, performance metrics, and error tracking
+- **Socket.IO Analytics**: Connection quality, message performance, and user behavior
+- **Business Intelligence**: Match success rates, task completion, and user activity trends
+
+#### Deployment & Configuration
+- **Environment-Specific Configuration**: Development, staging, and production configurations
+- **Deployment Validation**: Automatic configuration validation and error detection
+- **Infrastructure as Code**: Docker Compose, Nginx, and environment file generation
+- **Security Hardening**: Production-ready security headers and CORS configuration
+
+#### Database & Storage Optimization
+- **Connection Pooling**: Optimized database connection management
+- **Query Caching**: Intelligent caching of frequently accessed data
+- **Storage Analytics**: File usage statistics and optimization recommendations
+- **Backup & Recovery**: Automated backup systems and disaster recovery
+
+### Technology Stack Summary
+- **Backend Framework**: FastAPI with async/await support
+- **Database**: PostgreSQL with SQLAlchemy 2.0 async ORM
+- **Real-time Communication**: Consolidated Socket.IO implementation
+- **Caching**: Multi-level caching system with intelligent invalidation
+- **File Storage**: Enhanced local storage with CDN integration capabilities
+- **Monitoring**: Comprehensive analytics and performance monitoring
+- **Deployment**: Docker-based deployment with environment-specific configurations
+- **Security**: Production-ready security headers, CORS, and authentication
+
+### Performance Optimizations
+- **Response Compression**: Gzip and Brotli compression for API responses
+- **Image Optimization**: Automatic resizing, compression, and modern format support
+- **Database Optimization**: Connection pooling, query caching, and performance monitoring
+- **CDN Integration**: Ready for global content delivery network deployment
+- **Caching Strategy**: Multi-level caching with intelligent invalidation patterns
+
+### Scalability Features
+- **Horizontal Scaling**: Stateless design ready for load balancing
+- **Database Scaling**: Connection pooling and query optimization
+- **File Storage Scaling**: CDN integration and storage optimization
+- **Real-time Scaling**: Socket.IO clustering ready for multiple server instances
+- **Monitoring Scaling**: Comprehensive metrics for capacity planning 

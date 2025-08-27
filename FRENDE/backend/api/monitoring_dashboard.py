@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import logging
 
-from core.websocket_monitor import websocket_monitor
+from core.socketio_monitor import socketio_monitor
 from core.performance_monitor import get_performance_monitor
 from core.monitoring import SystemMonitor
 from core.database import check_database_health
@@ -25,7 +25,7 @@ async def get_websocket_health(
 ) -> Dict[str, Any]:
     """Get WebSocket connection health status"""
     try:
-        health = websocket_monitor.get_connection_health()
+        health = socketio_monitor.get_connection_health()
         return {
             "status": "success",
             "data": health,
@@ -41,7 +41,7 @@ async def get_websocket_stats(
 ) -> Dict[str, Any]:
     """Get WebSocket connection statistics"""
     try:
-        stats = websocket_monitor.get_connection_stats()
+        stats = socketio_monitor.get_connection_stats()
         return {
             "status": "success",
             "data": stats,
@@ -58,7 +58,7 @@ async def get_websocket_analytics(
 ) -> Dict[str, Any]:
     """Get WebSocket performance analytics"""
     try:
-        analytics = websocket_monitor.get_performance_analytics(hours=hours)
+        analytics = socketio_monitor.get_performance_analytics(hours=hours)
         return {
             "status": "success",
             "data": analytics,
@@ -74,7 +74,7 @@ async def get_websocket_quality_distribution(
 ) -> Dict[str, Any]:
     """Get distribution of WebSocket connection quality scores"""
     try:
-        distribution = websocket_monitor.get_quality_distribution()
+        distribution = socketio_monitor.get_quality_distribution()
         return {
             "status": "success",
             "data": distribution,
@@ -92,7 +92,7 @@ async def get_websocket_connections(
     """Get list of active WebSocket connections"""
     try:
         connections = []
-        for conn_id, conn in list(websocket_monitor.connections.items())[:limit]:
+        for conn_id, conn in list(socketio_monitor.connections.items())[:limit]:
             connections.append({
                 "connection_id": conn_id,
                 "user_id": conn.user_id,
@@ -110,7 +110,7 @@ async def get_websocket_connections(
             "status": "success",
             "data": {
                 "connections": connections,
-                "total_count": len(websocket_monitor.connections),
+                "total_count": len(socketio_monitor.connections),
                 "returned_count": len(connections)
             },
             "timestamp": datetime.utcnow().isoformat()
@@ -126,7 +126,7 @@ async def get_websocket_connection_details(
 ) -> Dict[str, Any]:
     """Get detailed information about a specific WebSocket connection"""
     try:
-        connection = websocket_monitor.get_connection(connection_id)
+        connection = socketio_monitor.get_connection(connection_id)
         if not connection:
             raise HTTPException(status_code=404, detail="Connection not found")
         
@@ -164,7 +164,7 @@ async def get_websocket_rooms(
     """Get list of active WebSocket rooms and their connection counts"""
     try:
         rooms = {}
-        for conn in websocket_monitor.connections.values():
+        for conn in socketio_monitor.connections.values():
             if conn.is_active:
                 for room_id in conn.room_ids:
                     if room_id not in rooms:
@@ -200,7 +200,7 @@ async def get_websocket_room_details(
 ) -> Dict[str, Any]:
     """Get detailed information about a specific WebSocket room"""
     try:
-        room_connections = websocket_monitor.get_connections_by_room(room_id)
+        room_connections = socketio_monitor.get_connections_by_room(room_id)
         
         if not room_connections:
             raise HTTPException(status_code=404, detail="Room not found")
@@ -252,7 +252,7 @@ async def get_websocket_history(
 ) -> Dict[str, Any]:
     """Get WebSocket connection history"""
     try:
-        history = websocket_monitor.get_connection_history(hours=hours)
+        history = socketio_monitor.get_connection_history(hours=hours)
         return {
             "status": "success",
             "data": {
@@ -273,10 +273,10 @@ async def trigger_websocket_cleanup(
     """Trigger manual WebSocket connection cleanup"""
     try:
         # Cleanup inactive connections
-        removed_inactive = websocket_monitor.cleanup_inactive_connections()
+        removed_inactive = socketio_monitor.cleanup_inactive_connections()
         
         # Cleanup unhealthy connections
-        removed_unhealthy = websocket_monitor.cleanup_unhealthy_connections()
+        removed_unhealthy = socketio_monitor.cleanup_unhealthy_connections()
         
         return {
             "status": "success",
@@ -284,7 +284,7 @@ async def trigger_websocket_cleanup(
                 "removed_inactive": removed_inactive,
                 "removed_unhealthy": removed_unhealthy,
                 "total_removed": removed_inactive + removed_unhealthy,
-                "remaining_connections": len(websocket_monitor.connections)
+                "remaining_connections": len(socketio_monitor.connections)
             },
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -299,8 +299,8 @@ async def get_system_overview(
     """Get comprehensive system overview including WebSocket, database, and performance metrics"""
     try:
         # WebSocket metrics
-        websocket_health = websocket_monitor.get_connection_health()
-        websocket_stats = websocket_monitor.get_connection_stats()
+            websocket_health = socketio_monitor.get_connection_health()
+    websocket_stats = socketio_monitor.get_connection_stats()
         
         # Database health
         db_health = await check_database_health()
@@ -339,7 +339,7 @@ async def get_system_alerts(
         alerts = []
         
         # WebSocket alerts
-        websocket_health = websocket_monitor.get_connection_health()
+        websocket_health = socketio_monitor.get_connection_health()
         if websocket_health["status"] == "critical":
             alerts.append({
                 "type": "websocket_critical",

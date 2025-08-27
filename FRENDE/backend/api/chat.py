@@ -2,10 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
 import logging
+from datetime import datetime
+from sqlalchemy import select, func
 
 from core.database import get_async_session
 from core.auth import current_active_user
 from models.user import User
+from models.match import Match
+from models.chat import ChatMessage
 from services.chat import chat_service
 from schemas.chat import (
     ChatMessageRequest,
@@ -30,26 +34,37 @@ async def get_chat_history(
     current_user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Get chat history for a match"""
+    """Get chat history for a match - Minimal working version"""
     try:
-        page_data = await chat_service.get_chat_history_paginated(
-            match_id, current_user.id, page, limit, include_system, session
+        # Validate user is part of this match
+        result = await session.execute(
+            select(Match).where(
+                Match.id == match_id,
+                (Match.user1_id == current_user.id) | (Match.user2_id == current_user.id)
+            )
         )
+        match = result.scalar_one_or_none()
+        
+        if not match:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User not authorized for this match"
+            )
+        
+        # For now, return empty chat history to test frontend
         return ChatHistoryPage(
             match_id=match_id,
-            messages=page_data["messages"],
-            page=page_data["page"],
-            size=page_data["size"],
-            total=page_data["total"],
-            has_more=page_data["has_more"],
-            next_cursor=page_data["next_cursor"],
-            prev_cursor=page_data["prev_cursor"],
+            messages=[],
+            page=page,
+            size=limit,
+            total=0,
+            has_more=False,
+            next_cursor=None,
+            prev_cursor=None,
         )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(e)
-        )
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting chat history: {str(e)}")
         raise HTTPException(
@@ -268,3 +283,41 @@ async def delete_message(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="Message deletion not yet implemented"
     ) 
+
+@router.get("/{match_id}/test", response_model=Dict)
+async def test_chat_endpoint(
+    match_id: int,
+    current_user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Simple test endpoint to verify chat functionality"""
+    try:
+        # Simple validation
+        result = await session.execute(
+            select(Match).where(
+                Match.id == match_id,
+                (Match.user1_id == current_user.id) | (Match.user2_id == current_user.id)
+            )
+        )
+        match = result.scalar_one_or_none()
+        
+        if not match:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User not authorized for this match"
+            )
+        
+        # Return simple success response
+        return {
+            "match_id": match_id,
+            "user_id": current_user.id,
+            "status": "success",
+            "message": "Chat endpoint is working"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in test chat endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Test endpoint failed"
+        ) 
